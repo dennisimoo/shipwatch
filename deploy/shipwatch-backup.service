@@ -1,0 +1,10 @@
+[Unit]
+Description=Consistent SQLite backup to private S3 storage
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/shipwatch.env
+ExecStart=/opt/shipwatch/deploy/backup.sh
+PrivateTmp=true
+UMask=0077

@@ -1,0 +1,24 @@
+[Unit]
+Description=Shipwatch website and frontend release observer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shipwatch
+Group=shipwatch
+WorkingDirectory=/opt/shipwatch
+EnvironmentFile=/etc/shipwatch.env
+ExecStart=/usr/local/bin/bun src/server.ts
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/shipwatch
+UMask=0077
+MemoryMax=1200M
+
+[Install]
+WantedBy=multi-user.target
