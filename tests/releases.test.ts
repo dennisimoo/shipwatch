@@ -3,6 +3,7 @@ import { beforeEach, expect, test } from "bun:test";
 process.env.DATABASE_PATH = ":memory:";
 let currentFingerprint = "baseline";
 const { db, now, recordSnapshot, recordFailure } = await import("../src/db");
+const { syncDirectory } = await import("../src/import-yc");
 
 function company() {
   return db
@@ -73,4 +74,59 @@ test("failed checks never change the baseline or confirm a pending release", asy
   expect(count()).toBe(0);
   expect(company().fingerprint).toBe("baseline");
   expect(company().candidate).toBeNull();
+});
+
+test("YC sync retains only the selected year's active companies and preserves community sites", () => {
+  db.query(
+    "INSERT INTO companies(id,name,url,source,created_at,next_check) VALUES ('yc-1','Old','https://old.example.com','yc',?,?)",
+  ).run(now(), now());
+  const old = db
+    .query("SELECT * FROM companies WHERE id='yc-1'")
+    .get() as ReturnType<typeof company>;
+  recordSnapshot(
+    old,
+    { fingerprint: "old", assets: {}, evidence: "{}" },
+    now(),
+  );
+  const entries = [
+    {
+      id: 1,
+      name: "Old",
+      website: "https://old.example.com",
+      batch: "Summer 2025",
+      status: "Active",
+      one_liner: "",
+      url: "",
+    },
+    {
+      id: 2,
+      name: "Recent",
+      website: "https://recent.example.com",
+      batch: "Summer 2026",
+      status: "Active",
+      one_liner: "",
+      url: "",
+    },
+    {
+      id: 3,
+      name: "Inactive",
+      website: "https://inactive.example.com",
+      batch: "Fall 2026",
+      status: "Inactive",
+      one_liner: "",
+      url: "",
+    },
+  ];
+  expect(syncDirectory(entries, "2026")).toBe(1);
+  expect(db.query("SELECT id FROM companies ORDER BY id").all()).toEqual([
+    { id: "test" },
+    { id: "yc-2" },
+  ]);
+  expect(
+    db.query("SELECT * FROM seen_versions WHERE company_id='yc-1'").all(),
+  ).toEqual([]);
+  expect(() => syncDirectory(entries, "1999")).toThrow();
+  expect(
+    db.query("SELECT id FROM companies WHERE id='yc-2'").get(),
+  ).not.toBeNull();
 });

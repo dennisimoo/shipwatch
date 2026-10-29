@@ -33,7 +33,7 @@ All leaderboard weekend and hour calculations use **UTC**. Rankings cover 7 or 3
 
 ## YC directory
 
-`bun run import:yc` imports the public [yc-oss directory](https://github.com/yc-oss/api), an unofficial mirror of YC directory data. All valid company URLs are retained. Monitoring is limited to companies in **Winter, Spring, Summer, and Fall 2026** with status `Active` or `Public`, plus community submissions. Set `MONITOR_YEAR` when importing to select another year. This keeps the initial comparison focused on recent cohorts; release frequency alone does not establish that a company is moving fast. This is a selection of publicly launched companies, not every company funded by YC. Re-run the import to refresh company metadata. Monitoring a marketing homepage does not necessarily reflect product releases.
+`bun run import:yc` reads the public [yc-oss directory](https://github.com/yc-oss/api), an unofficial mirror of YC directory data. It retains only companies in **Winter, Spring, Summer, and Fall 2026** with status `Active` or `Public` and valid website URLs, plus community submissions. Older and ineligible YC entries and their observations are removed on import; community submissions are preserved. Set `MONITOR_YEAR` when importing to select another year. This keeps the initial comparison focused on recent cohorts; release frequency alone does not establish that a company is moving fast. This is a selection of publicly launched companies, not every company funded by YC. Re-run the import to refresh company metadata. Monitoring a marketing homepage does not necessarily reflect product releases.
 
 ## Layout
 
