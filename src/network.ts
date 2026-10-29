@@ -1,34 +1,11 @@
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
 import http from "node:http";
 import https from "node:https";
+import ipaddr from "ipaddr.js";
+import robotsParser from "robots-parser";
 
 export function publicAddress(address: string): boolean {
-  if (isIP(address) === 4) {
-    const octets = address.split(".").map(Number);
-    const [first, second, third] = octets;
-    return !(
-      first === 0 ||
-      first === 10 ||
-      first === 127 ||
-      first >= 224 ||
-      (first === 100 && second >= 64 && second <= 127) ||
-      (first === 169 && second === 254) ||
-      (first === 172 && second >= 16 && second <= 31) ||
-      (first === 192 && (second === 168 || second === 0 || second === 2)) ||
-      (first === 198 &&
-        (second === 18 || second === 19 || (second === 51 && third === 100))) ||
-      (first === 203 && second === 0 && third === 113)
-    );
-  }
-  if (isIP(address) === 6) {
-    return (
-      /^[23][0-9a-f]{3}:/i.test(address) &&
-      !/^2001:(db8|0|10|20):/i.test(address) &&
-      !/^2002:/i.test(address)
-    );
-  }
-  return false;
+  return ipaddr.isValid(address) && ipaddr.parse(address).range() === "unicast";
 }
 
 export function normalizeUrl(input: string): URL {
@@ -134,65 +111,10 @@ export async function fetchPublic(
 }
 
 export function robotsAllowed(text: string, path: string): boolean {
-  const groups: {
-    agents: string[];
-    rules: { path: string; allow: boolean }[];
-  }[] = [];
-  let group: (typeof groups)[number] = { agents: [], rules: [] };
-  for (const raw of text.split("\n")) {
-    const line = raw.split("#")[0].trim();
-    const separator = line.indexOf(":");
-    if (separator < 0) continue;
-    const key = line.slice(0, separator).trim().toLowerCase();
-    const value = line.slice(separator + 1).trim();
-    if (key === "user-agent") {
-      if (group.rules.length) {
-        groups.push(group);
-        group = { agents: [], rules: [] };
-      }
-      group.agents.push(value.toLowerCase());
-    } else if (
-      (key === "allow" || key === "disallow") &&
-      value &&
-      group.agents.length
-    ) {
-      group.rules.push({ path: value, allow: key === "allow" });
-    }
-  }
-  groups.push(group);
-  const specific = groups.filter((entry) =>
-    entry.agents.some((agent) => agent !== "*" && "shipwatch".includes(agent)),
+  return (
+    robotsParser("https://robots.invalid/robots.txt", text).isAllowed(
+      `https://robots.invalid${path}`,
+      "Shipwatch",
+    ) !== false
   );
-  const applicable = specific.length
-    ? specific
-    : groups.filter((entry) => entry.agents.includes("*"));
-  const matches = applicable
-    .flatMap((entry) => entry.rules)
-    .filter((rule) => {
-      const anchored = rule.path.endsWith("$");
-      const parts = (anchored ? rule.path.slice(0, -1) : rule.path).split("*");
-      let cursor = 0;
-      for (let index = 0; index < parts.length; index++) {
-        const part = parts[index];
-        const position =
-          index === 0
-            ? path.startsWith(part)
-              ? 0
-              : -1
-            : anchored && index === parts.length - 1
-              ? path.endsWith(part)
-                ? path.length - part.length
-                : -1
-              : path.indexOf(part, cursor);
-        if (position < cursor) return false;
-        cursor = position + part.length;
-      }
-      return !anchored || cursor === path.length;
-    })
-    .sort(
-      (left, right) =>
-        right.path.length - left.path.length ||
-        Number(right.allow) - Number(left.allow),
-    );
-  return matches[0]?.allow ?? true;
 }

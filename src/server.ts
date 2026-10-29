@@ -3,10 +3,12 @@ import { startPolling } from "./poller";
 import { importYC } from "./import-yc";
 import { fetchPublic, normalizeUrl } from "./network";
 import { hash } from "./detect";
+import { RateLimiterMemory, RateLimiterRes } from "rate-limiter-flexible";
 
 const publicDirectory = new URL("../public/", import.meta.url);
 const cache = new Map<string, { at: number; value: unknown }>();
-const submissions = new Map<string, number>();
+const submissions = new RateLimiterMemory({ points: 1, duration: 60 });
+const reads = new RateLimiterMemory({ points: 120, duration: 60 });
 let submitting = 0;
 
 function leaderboard(url: URL) {
@@ -122,6 +124,14 @@ const server = Bun.serve({
         },
       });
     try {
+      const directIp = server.requestIP(request)?.address || "unknown";
+      const forwardedIp =
+        process.env.TRUST_PROXY === "1"
+          ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+          : null;
+      const client = forwardedIp || directIp;
+      if (request.method === "GET" && url.pathname.startsWith("/api/"))
+        await reads.consume(client);
       if (request.method === "GET" && url.pathname === "/health") {
         return json({
           ok: db.query("SELECT 1").get() !== null,
@@ -167,13 +177,7 @@ const server = Bun.serve({
             : url.origin;
         if (request.headers.get("origin") !== expectedOrigin)
           return json({ error: "Submit from the website." }, 403);
-        const ip = server.requestIP(request)?.address || "unknown";
-        const forwarded =
-          process.env.TRUST_PROXY === "1"
-            ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-            : null;
-        const client = forwarded || ip;
-        if (submitting >= 3 || (submissions.get(client) || 0) > now() - 60)
+        if (submitting >= 3)
           return json(
             { error: "Please wait a minute before submitting another site." },
             429,
@@ -188,8 +192,7 @@ const server = Bun.serve({
             { error: "Today's community submission limit has been reached." },
             429,
           );
-        if (submissions.size > 10000) submissions.clear();
-        submissions.set(client, now());
+        await submissions.consume(client);
         submitting++;
         try {
           const input = (await request.json()) as {
@@ -245,6 +248,17 @@ const server = Bun.serve({
         },
       });
     } catch (error) {
+      if (error instanceof RateLimiterRes) {
+        const response = json(
+          { error: "Too many requests. Please try again shortly." },
+          429,
+        );
+        response.headers.set(
+          "Retry-After",
+          String(Math.ceil(error.msBeforeNext / 1000)),
+        );
+        return response;
+      }
       console.error(error);
       return json(
         {

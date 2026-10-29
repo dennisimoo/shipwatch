@@ -15,6 +15,9 @@
     "typescript": "latest"
   },
   "dependencies": {
-    "entities": "^9.0.0"
+    "entities": "^9.0.0",
+    "ipaddr.js": "^2.5.0",
+    "rate-limiter-flexible": "^11.2.3",
+    "robots-parser": "^3.0.1"
   }
 }
