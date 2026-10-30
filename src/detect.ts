@@ -23,7 +23,7 @@ const revalidateAfter = 86400;
 export function immutableAsset(address: string, cacheControl: string | string[] | undefined): boolean {
   const header = String(cacheControl || "").toLowerCase();
   if (/no-store|no-cache/.test(header)) return false;
-  const maxAge = Number(/(?:^|,)\s*(?:s-)?max-age=(\d+)/.exec(header)?.[1] ?? 0);
+  const maxAge = Number(/(?:^|,)\s*(?:s-maxage|max-age)=(\d+)/.exec(header)?.[1] ?? 0);
   const plain = new URL(address);
   plain.searchParams.delete("dpl");
   plain.hash = "";
@@ -211,6 +211,8 @@ export async function inspectBundles(
   const builders = new Set(scripts.map(builderSite).filter(Boolean));
   const firstParty = (address: string) => sameSite(url, address) || builders.has(builderSite(address));
   const missing: string[] = [];
+  // Chunks that did not fit the remaining budget; remembered for a day so they aren't re-downloaded every check.
+  const tooLarge: Record<string, Asset> = {};
   const queue = scripts.filter(firstParty);
   const queued = new Set(queue);
   for (let index = 0; index < queue.length && Object.keys(assets).length < assetLimit; index++) {
@@ -234,12 +236,20 @@ export async function inspectBundles(
       if (!Object.keys(assets).length) throw new Error("Bundle inspection exceeds size limit");
       break;
     }
+    const limit = Math.min(15_000_000, byteLimit - bytes);
+    if (old?.method === "too-large" && old.fetchedAt && fetchedAt - old.fetchedAt < revalidateAfter && (old.size ?? 0) > limit) {
+      tooLarge[script] = old;
+      break;
+    }
     let asset;
     try {
-      asset = await fetchPublic(script, headers, Math.min(15_000_000, byteLimit - bytes));
+      asset = await fetchPublic(script, headers, limit);
     } catch (error) {
       // Past the budget, leave the remaining chunks uninspected rather than failing the whole site.
-      if (Object.keys(assets).length && error instanceof Error && error.message === "Response exceeds size limit") break;
+      if (Object.keys(assets).length && error instanceof Error && error.message === "Response exceeds size limit") {
+        tooLarge[script] = { hash: "", method: "too-large", size: limit + 1, fetchedAt };
+        break;
+      }
       throw error;
     }
     bytes += asset.status === 304 ? old?.size ?? 0 : asset.bytes;
@@ -303,8 +313,10 @@ export async function inspectBundles(
     .map(([address, asset]) => [assetIdentity(address), asset.contentHash])
     .sort();
   const uninspected = queue.filter((script) => !assets[script] && !missing.includes(script)).map(assetIdentity).sort();
+  // Missing chunks join the fingerprint only when present, so sites without them keep their existing fingerprints.
   const gone = missing.map(assetIdentity).sort();
   const fingerprint = "content-v3:" + hash(JSON.stringify(gone.length ? { content, uninspected, missing: gone } : { content, uninspected }));
-  const captureScope = builders.size ? "registrable-128-v3" : "registrable-128-v2";
-  return { fingerprint, assets, evidence, bytes, transferBytes, captureScope };
+  // Sticky once a site has used builder assets, so one page load without them can't reset the baseline.
+  const captureScope = builders.size || Object.keys(previous).some(builderSite) ? "registrable-128-v3" : "registrable-128-v2";
+  return { fingerprint, assets: { ...assets, ...tooLarge }, evidence, bytes, transferBytes, captureScope };
 }
