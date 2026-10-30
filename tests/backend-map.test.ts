@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { detectServices, graphqlOperations, nextRoutes, routeShape } from "../src/backend-map";
-import { immutableAsset } from "../src/detect";
+import { builderSite, immutableAsset } from "../src/detect";
 import { checkBackoff, retryAfterSeconds, BackoffError } from "../src/network";
 
 test("route shapes collapse IDs and jsluice expressions", () => {
@@ -68,4 +68,12 @@ test("archived copies yield deploy IDs, else a signature of hashed script names"
   const captures = Array.from({ length: 30 }, (_unused, index) => [`202610${String(1 + Math.floor(index / 3)).padStart(2, "0")}1${index % 3}0000`, String(index)] as [string, string]);
   expect(chooseCaptures(captures, 40)).toHaveLength(30);
   expect(chooseCaptures(captures, 5)).toHaveLength(5);
+});
+
+test("site-builder CDN paths are first-party only for the site's own ID", () => {
+  expect(builderSite("https://framerusercontent.com/sites/3x9Kq2LmPz/script_main.Bx1.mjs")).toBe("framer:3x9Kq2LmPz");
+  expect(builderSite("https://framerusercontent.com/images/abc.png")).toBeNull();
+  expect(builderSite("https://cdn.prod.website-files.com/64a1b2c3d4e5f60718293a4b/js/webflow.abc123.js")).toBe("webflow:64a1b2c3d4e5f60718293a4b");
+  expect(builderSite("https://cdn.prod.website-files.com/64a1b2c3d4e5f60718293a4b/css/site.css")).toBeNull();
+  expect(builderSite("https://example.com/sites/3x9Kq2LmPz/a.mjs")).toBeNull();
 });

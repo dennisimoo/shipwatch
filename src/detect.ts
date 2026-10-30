@@ -13,6 +13,8 @@ export interface Asset {
   modified?: string;
   immutable?: boolean;
   fetchedAt?: number;
+  /** Decoded size, so the inspection budget is spent the same way whether an asset was reused or fetched. */
+  size?: number;
 }
 
 const revalidateAfter = 86400;
@@ -27,6 +29,20 @@ export function immutableAsset(address: string, cacheControl: string | string[] 
   plain.hash = "";
   const hashed = assetIdentity(address) !== plain.href;
   return hashed && (header.includes("immutable") || maxAge >= 2592000);
+}
+
+/** Per-site paths on site-builder CDNs (Framer, Webflow) belong to that one site, so they count as first-party. */
+export function builderSite(address: string): string | null {
+  const target = new URL(address);
+  if (target.hostname === "framerusercontent.com") {
+    const id = /^\/sites\/([A-Za-z0-9]{8,40})\//.exec(target.pathname)?.[1];
+    return id ? "framer:" + id : null;
+  }
+  if (/^(?:cdn\.prod\.website-files\.com|assets\.website-files\.com|assets-global\.website-files\.com)$/.test(target.hostname)) {
+    const id = /^\/([a-f0-9]{24})\/js\//.exec(target.pathname)?.[1];
+    return id ? "webflow:" + id : null;
+  }
+  return null;
 }
 
 const scanner = new Bun.Transpiler({ loader: "js" });
@@ -131,7 +147,7 @@ export async function extractScripts(
         try {
           const target = new URL(decodeHTMLAttribute(raw), base);
           if (!["https:", "http:"].includes(target.protocol)) return;
-          if (!sameSite(base, target.href))
+          if (!sameSite(base, target.href) && !builderSite(target.href))
             return;
           if (
             /analytics|gtag|googletag|segment|hotjar|clarity|intercom|tracking|pixel/i.test(
@@ -192,15 +208,19 @@ export async function inspectBundles(
   let bytes = initialBytes;
   let transferBytes = 0;
   const fetchedAt = Math.floor(Date.now() / 1000);
-  const queue = scripts.filter((script) => sameSite(url, script));
+  const builders = new Set(scripts.map(builderSite).filter(Boolean));
+  const firstParty = (address: string) => sameSite(url, address) || builders.has(builderSite(address));
+  const missing: string[] = [];
+  const queue = scripts.filter(firstParty);
   const queued = new Set(queue);
   for (let index = 0; index < queue.length && Object.keys(assets).length < assetLimit; index++) {
     const script = queue[index];
     const old = previous[script];
     if (old?.method === "content-v3" && old.immutable && old.fetchedAt && fetchedAt - old.fetchedAt < revalidateAfter) {
       assets[script] = old;
+      bytes += old.size ?? 0;
       for (const reference of old.references ?? [])
-        if (sameSite(url, reference) && !queued.has(reference)) {
+        if (firstParty(reference) && !queued.has(reference)) {
           queue.push(reference);
           queued.add(reference);
         }
@@ -210,33 +230,53 @@ export async function inspectBundles(
     const currentCache = old?.method === "content-v3.1";
     if (currentCache && old.etag) headers["If-None-Match"] = old.etag;
     if (currentCache && old.modified) headers["If-Modified-Since"] = old.modified;
-    if (bytes >= byteLimit) throw new Error("Bundle inspection exceeds size limit");
-    const asset = await fetchPublic(script, headers, Math.min(5_000_000, byteLimit - bytes));
-    bytes += asset.bytes;
+    if (bytes >= byteLimit) {
+      if (!Object.keys(assets).length) throw new Error("Bundle inspection exceeds size limit");
+      break;
+    }
+    let asset;
+    try {
+      asset = await fetchPublic(script, headers, Math.min(15_000_000, byteLimit - bytes));
+    } catch (error) {
+      // Past the budget, leave the remaining chunks uninspected rather than failing the whole site.
+      if (Object.keys(assets).length && error instanceof Error && error.message === "Response exceeds size limit") break;
+      throw error;
+    }
+    bytes += asset.status === 304 ? old?.size ?? 0 : asset.bytes;
     transferBytes += asset.transferBytes ?? asset.bytes;
     checkBackoff(asset);
-    if (!sameSite(url, asset.url)) throw new Error("Bundle redirected outside the website's domain");
+    if (!firstParty(asset.url)) throw new Error("Bundle redirected outside the website's domain");
+    const html = String(asset.headers["content-type"]).includes("text/html");
+    if ([404, 410].includes(asset.status) || (asset.status === 200 && html)) {
+      // Stale chunk references and SPA fallbacks serving index.html are common; note them instead of failing the site.
+      missing.push(script);
+      continue;
+    }
     if (asset.status === 304 && currentCache)
       assets[script] = { ...old, immutable: immutableAsset(script, asset.headers["cache-control"]) || old.immutable, fetchedAt };
-    else if (
-      asset.status === 200 &&
-      !String(asset.headers["content-type"]).includes("text/html")
-    ) {
+    else if (asset.status === 200) {
+      let references: string[] = [];
+      try {
+        references = bundleReferences(asset.body, asset.url);
+      } catch {
+        // Unparseable bundles still fingerprint by content; only reference following is skipped.
+      }
       assets[script] = {
         hash: hash(asset.body),
         contentHash: hash(normalizeContent(asset.body, asset.url)),
         method: "content-v3.1",
-        references: bundleReferences(asset.body, asset.url),
+        references,
         etag: asset.headers.etag,
         modified: asset.headers["last-modified"],
         immutable: immutableAsset(script, asset.headers["cache-control"]),
         fetchedAt,
+        size: asset.bytes,
       };
       saveBody?.(assets[script].hash, asset.body);
     } else throw new Error(`Bundle returned HTTP ${asset.status}`);
     for (const reference of assets[script].references ?? []) {
       if (
-        sameSite(url, reference) &&
+        firstParty(reference) &&
         !queued.has(reference)
       ) {
         queue.push(reference);
@@ -244,6 +284,9 @@ export async function inspectBundles(
       }
     }
   }
+  const entries = scripts.filter(firstParty);
+  if (entries.length && entries.every((script) => missing.includes(script)))
+    throw new Error("Every first-party script is missing");
   const evidence = JSON.stringify({
     method: "content-v3",
     scripts,
@@ -253,11 +296,15 @@ export async function inspectBundles(
       contentHash: asset.contentHash,
     })),
     build,
-    uninspected: queue.filter((script) => !assets[script]),
+    uninspected: queue.filter((script) => !assets[script] && !missing.includes(script)),
+    ...(missing.length ? { missing } : {}),
   });
   const content = Object.entries(assets)
     .map(([address, asset]) => [assetIdentity(address), asset.contentHash])
     .sort();
-  const uninspected = queue.filter((script) => !assets[script]).map(assetIdentity).sort();
-  return { fingerprint: "content-v3:" + hash(JSON.stringify({ content, uninspected })), assets, evidence, bytes, transferBytes, captureScope: "registrable-128-v2" };
+  const uninspected = queue.filter((script) => !assets[script] && !missing.includes(script)).map(assetIdentity).sort();
+  const gone = missing.map(assetIdentity).sort();
+  const fingerprint = "content-v3:" + hash(JSON.stringify(gone.length ? { content, uninspected, missing: gone } : { content, uninspected }));
+  const captureScope = builders.size ? "registrable-128-v3" : "registrable-128-v2";
+  return { fingerprint, assets, evidence, bytes, transferBytes, captureScope };
 }
