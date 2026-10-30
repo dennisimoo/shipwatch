@@ -101,7 +101,7 @@ Sibling assets such as `app.example.com` loading `cdn.example.com` are included 
 
 **Before Shipwatch.** `bun run backfill:wayback --company=<slug> [--since=YYYYMMDD] [--max=40] [--apply]` reads Wayback Machine copies of a monitored page (one request every 1.5 seconds) and stores distinct builds in `archived_builds`. Archive coverage is sparse, so profiles show this as a lower bound, separate from releases.
 
-**Backend map.** `GET /api/company/:slug/backend` combines jsluice output from the latest captured scripts with hand-written host and SDK rules for about 55 services, Next.js route manifests, GraphQL operation names, and WebSocket URLs. It is cached per capture. It lists requests the browser code can make; it does not request them, prove they are live, or show what the server does.
+**Backend map.** `GET /api/company/:slug/backend` combines jsluice output from the latest captured scripts with hand-written host and SDK rules for about 55 services, Next.js route manifests, GraphQL operation names, WebSocket URLs, Next.js server action names, and (when the Supabase SDK is present) the tables, database functions, and storage buckets its client calls name. It is cached per capture. It lists requests the browser code can make; it does not request them, prove they are live, or show what the server does.
 
 Expanding capture scope establishes a fresh fingerprint baseline on the next successful check, without adding a release or deleting existing history. Subsequent changes use the normal confirmation flow.
 

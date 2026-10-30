@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { detectServices, graphqlOperations, nextRoutes, routeShape } from "../src/backend-map";
+import { detectServices, graphqlOperations, nextRoutes, routeShape, serverActions, supabaseUsage } from "../src/backend-map";
 import { builderSite, immutableAsset } from "../src/detect";
 import { checkBackoff, retryAfterSeconds, BackoffError } from "../src/network";
 
@@ -37,6 +37,7 @@ test("only hashed assets with long-lived cache headers are treated as immutable"
   expect(immutableAsset(hashed, "public, max-age=0, must-revalidate")).toBe(false);
   expect(immutableAsset("https://x.com/app.js", "public, max-age=31536000, immutable")).toBe(false);
   expect(immutableAsset(hashed, "no-cache, max-age=31536000")).toBe(false);
+  expect(immutableAsset(hashed, "public, s-maxage=31536000")).toBe(true);
 });
 
 test("rate limits and bot challenges become backoff, never content", () => {
@@ -76,4 +77,23 @@ test("site-builder CDN paths are first-party only for the site's own ID", () => 
   expect(builderSite("https://cdn.prod.website-files.com/64a1b2c3d4e5f60718293a4b/js/webflow.abc123.js")).toBe("webflow:64a1b2c3d4e5f60718293a4b");
   expect(builderSite("https://cdn.prod.website-files.com/64a1b2c3d4e5f60718293a4b/css/site.css")).toBeNull();
   expect(builderSite("https://example.com/sites/3x9Kq2LmPz/a.mjs")).toBeNull();
+});
+
+test("server actions keep their names when the build includes them", () => {
+  const id = "406773d6b6f14e2141b3a86a45e32349118de0dab7";
+  const named = `let r5=(0,r2.createServerReference)("${id}",r2.callServer,void 0,r2.findSourceMapURL,"sendSignup")`;
+  const unnamed = `(0,a.createServerReference)("${"7f".repeat(21)}",a.callServer)`;
+  expect([...serverActions(named + ";" + unnamed)]).toEqual([[id, "sendSignup"], ["7f".repeat(21), null]]);
+});
+
+test("Supabase calls reveal tables, functions, and buckets, not storage paths", () => {
+  const usage = supabaseUsage(
+    'e.from("profiles").select("*");e.from("profiles").update({a:1});e.from("project_members").delete();' +
+    'e.storage.from("avatars").upload(p);e.rpc("search_projects",{q});e.functions.invoke("send-email",{})',
+  );
+  expect(Object.fromEntries([...usage.tables].map(([name, uses]) => [name, [...uses]]))).toEqual({
+    profiles: ["read", "change"], project_members: ["delete"],
+  });
+  expect([...usage.functions].sort()).toEqual(["search_projects", "send-email"]);
+  expect([...usage.buckets]).toEqual(["avatars"]);
 });
