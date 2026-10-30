@@ -255,9 +255,12 @@ const server = Bun.serve({
         const deploys = db.query(`SELECT COUNT(*) AS count,MAX(first_seen) AS latest,
             (SELECT COUNT(*) FROM deploys WHERE company_id=?) AS tracked
             FROM deploys WHERE company_id=? AND baseline=0 AND first_seen>=?`).get(id, id, now() - 30 * 86400);
+        const archived = db.query(`SELECT COUNT(*) AS builds,MIN(first_archived) AS first,MAX(last_archived) AS last
+            FROM archived_builds WHERE company_id=?`).get(id);
         return json({
           company,
           deploys,
+          archived,
           releases,
           coverage,
           targets,

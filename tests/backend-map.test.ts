@@ -57,3 +57,15 @@ test("deploy IDs prefer Vercel deployment IDs over build IDs", async () => {
   expect(deploymentId("<html></html>", "abc")).toBe("next:abc");
   expect(deploymentId("<html></html>", null)).toBe(null);
 });
+
+test("archived copies yield deploy IDs, else a signature of hashed script names", async () => {
+  const { archivedBuild, chooseCaptures } = await import("../src/backfill-wayback");
+  expect(archivedBuild('<script src="/a.js?dpl=dpl_GbxEX696tcdKJaiufyixNZGAgroB">', [])).toBe("dpl_GbxEX696tcdKJaiufyixNZGAgroB");
+  const one = archivedBuild("<html>", ["https://x.com/assets/index-AbCdEf12.js", "https://x.com/app.js"]);
+  expect(one).toStartWith("assets:");
+  expect(archivedBuild("<html>", ["https://x.com/assets/index-ZyXwVu98.js", "https://x.com/app.js"])).not.toBe(one);
+  expect(archivedBuild("<html>", ["https://x.com/app.js"])).toBe(null);
+  const captures = Array.from({ length: 30 }, (_unused, index) => [`202610${String(1 + Math.floor(index / 3)).padStart(2, "0")}1${index % 3}0000`, String(index)] as [string, string]);
+  expect(chooseCaptures(captures, 40)).toHaveLength(30);
+  expect(chooseCaptures(captures, 5)).toHaveLength(5);
+});

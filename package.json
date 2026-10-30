@@ -8,6 +8,7 @@
     "dev": "bun --watch src/server.ts",
     "import:yc": "bun src/import-yc.ts",
     "recheck:history": "bun src/recheck-history.ts",
+    "backfill:wayback": "bun src/backfill-wayback.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

@@ -74,6 +74,11 @@ db.exec(`
     deployment TEXT NOT NULL, first_seen INTEGER NOT NULL, baseline INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(company_id, deployment)
   );
+  CREATE TABLE IF NOT EXISTS archived_builds (
+    company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE, url TEXT NOT NULL, build TEXT NOT NULL,
+    first_archived INTEGER NOT NULL, last_archived INTEGER NOT NULL, recorded_at INTEGER NOT NULL,
+    PRIMARY KEY(company_id, url, build)
+  );
   CREATE TABLE IF NOT EXISTS discovery_drafts (
     token TEXT PRIMARY KEY, payload TEXT NOT NULL, expires_at INTEGER NOT NULL
   );
