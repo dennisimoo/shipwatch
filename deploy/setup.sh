@@ -17,6 +17,11 @@ curl --fail --location https://github.com/projectdiscovery/subfinder/releases/do
 (cd "$installation_directory" && grep ' subfinder_2.17.0_linux_arm64.zip$' subfinder-checksums.txt | sha256sum -c -)
 unzip -q "$installation_directory/subfinder_2.17.0_linux_arm64.zip" subfinder -d "$installation_directory"
 install "$installation_directory/subfinder" /usr/local/bin/subfinder
+curl --fail --location https://github.com/projectdiscovery/urlfinder/releases/download/v0.0.3/urlfinder_0.0.3_linux_arm64.zip -o "$installation_directory/urlfinder_0.0.3_linux_arm64.zip"
+curl --fail --location https://github.com/projectdiscovery/urlfinder/releases/download/v0.0.3/urlfinder_0.0.3_checksums.txt -o "$installation_directory/urlfinder-checksums.txt"
+(cd "$installation_directory" && grep ' urlfinder_0.0.3_linux_arm64.zip$' urlfinder-checksums.txt | sha256sum -c -)
+unzip -q "$installation_directory/urlfinder_0.0.3_linux_arm64.zip" urlfinder -d "$installation_directory"
+install "$installation_directory/urlfinder" /usr/local/bin/urlfinder
 curl --fail --location https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o "$installation_directory/aws.zip"
 unzip -q "$installation_directory/aws.zip" -d "$installation_directory"
 "$installation_directory/aws/install" --update

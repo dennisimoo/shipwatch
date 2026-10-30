@@ -5,8 +5,48 @@ import * as network from "../src/network";
 
 process.env.DATABASE_PATH = ":memory:";
 const { certificateSubdomains } = await import("../src/subdomains");
-const { optionsFrom, pageContent, recommend, selectedUrls, shortlist } =
+const { fallbackPaths } = await import("../src/passive-urls");
+const { inspect, optionsFrom, pageContent, recommend, selectedUrls, shortlist } =
   await import("../src/discovery");
+
+test("passive page fallback accepts only bounded same-origin public paths", () => {
+  expect(fallbackPaths(`https://acme.com/docs\nhttps://acme.com/app\nhttps://acme.com/app?token=x\nhttps://evil.com/docs\nhttps://acme.com/admin\nhttps://acme.com/console`, "https://acme.com/")).toEqual([
+    "https://acme.com/app", "https://acme.com/console",
+  ]);
+});
+
+test("linked-page discovery stays same-origin without requesting robots.txt", async () => {
+  const requested: string[] = [];
+  const fetch = spyOn(network, "fetchPublic").mockImplementation(async (address) => {
+    requested.push(address);
+    return { url: address, status: 200, headers: { "content-type": "text/html" }, bytes: 100,
+      body: '<a href="/app">App</a><a href="https://evil.com/docs">Other</a><a href="/docs?secret=x">Query</a><script src="/main.js"></script>' };
+  });
+  try {
+    const root = await inspect("https://acme.com/", "Submitted company website");
+    expect(root.links).toEqual(["https://acme.com/app"]);
+    const linked = await inspect(root.links![0], "Linked public page");
+    expect(linked.candidate.error).toBe(null);
+    expect(requested).toContain("https://acme.com/app");
+    expect(requested.some((url) => url.endsWith("/robots.txt"))).toBe(false);
+  } finally { fetch.mockRestore(); }
+});
+
+test("discovery accepts same-site redirects and constrains fallback fetches", async () => {
+  const fetch = spyOn(network, "fetchPublic").mockResolvedValue({
+    url: "https://www.acme.com/", status: 200, headers: { "content-type": "text/html" }, bytes: 100,
+    body: '<a href="/app">App</a><script src="/main.js"></script>',
+  });
+  try {
+    const result = await inspect("http://acme.com/", "Submitted company website");
+    expect(result.links).toEqual(["https://www.acme.com/app"]);
+    expect(result.pageOrigin).toBe("https://www.acme.com");
+    fetch.mockResolvedValue({ url: "https://acme.com/", status: 429, headers: {}, bytes: 0, body: "" });
+    expect((await inspect("https://acme.com/", "Submitted company website")).blocked).toBe(true);
+  } finally { fetch.mockRestore(); }
+  await expect(network.fetchPublic("https://other.example/", {}, undefined, undefined,
+    (url) => url.origin === "https://www.acme.com")).rejects.toThrow("outside the allowed website");
+});
 
 test("host shortlisting respects the inspection budget and rejects invented hosts", async () => {
   let responseHosts = ["app.acme.com", "api.acme.com"];
@@ -93,6 +133,8 @@ test("Luna suggestions are capped, while a user can override an inspectable sugg
     },
   ];
   expect(recommend(candidates, 1)).toEqual(["https://console.acme.com/"]);
+  expect(recommend([...candidates, { ...candidates[1], url: "https://console.acme.com/docs", probability: 0.98 }], 3))
+    .toEqual(["https://console.acme.com/", "https://mobile.acme.com/"]);
   const review = {
     name: "Acme",
     url: "https://acme.com",

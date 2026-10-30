@@ -214,13 +214,21 @@ function updateSelection() {
   ];
   const maximum = discoveryDraft.review.options.domainLimit;
   select("#selection-count").textContent =
-    `${selected.length} selected · choose 1–${maximum}`;
+    `${selected.length} selected · choose 1–${maximum}, one per domain`;
   select("#submit-site").disabled =
     selected.length < 1 || selected.length > maximum;
   select("#submit-site").textContent =
     `Monitor ${selected.length} selected ${selected.length === 1 ? "URL" : "URLs"}`;
 }
-select("#discovery-candidates").addEventListener("change", updateSelection);
+select("#discovery-candidates").addEventListener("change", (event) => {
+  const changed = event.target;
+  if (changed.matches(".candidate-checkbox") && changed.checked) {
+    const hostname = new URL(changed.value).hostname;
+    for (const other of document.querySelectorAll(".candidate-checkbox:checked"))
+      if (other !== changed && new URL(other.value).hostname === hostname) other.checked = false;
+  }
+  updateSelection();
+});
 select("#discovery-back").addEventListener("click", () => {
   discoveryDraft = null;
   select("#discovery-inputs").disabled = false;
@@ -266,7 +274,7 @@ select("#add-form").addEventListener("submit", async (event) => {
       select("#discovery-candidates").innerHTML = result.review.candidates
         .map(
           (candidate) =>
-            `<label class="candidate-choice"><input class="candidate-checkbox" type="checkbox" value="${escape(candidate.url)}" ${result.review.recommended.includes(candidate.url) ? "checked" : ""} ${candidate.error ? "disabled" : ""}><span><strong>${escape(candidate.title || host(candidate.url))}</strong><small>${escape(candidate.url)}</small>${candidate.error ? `<small>${escape(candidate.error)}</small>` : result.review.recommended.includes(candidate.url) ? "<small>Suggested</small>" : ""}</span></label>`,
+            `<label class="candidate-choice"><input class="candidate-checkbox" type="checkbox" value="${escape(candidate.url)}" ${result.review.recommended.includes(candidate.url) ? "checked" : ""} ${candidate.error ? "disabled" : ""}><span><strong>${escape(candidate.title || host(candidate.url))}</strong><small>${escape(candidate.url)}</small>${candidate.source === "Passively discovered page" ? "<small>Found through public archives</small>" : candidate.source === "Linked public page" ? "<small>Linked from submitted page</small>" : ""}${candidate.error ? `<small>${escape(candidate.error)}</small>` : result.review.recommended.includes(candidate.url) ? "<small>Suggested</small>" : ""}</span></label>`,
         )
         .join("");
       updateSelection();

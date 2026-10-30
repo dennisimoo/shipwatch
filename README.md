@@ -53,6 +53,8 @@ AI discovery and change analysis need a server-side `OPENAI_API_KEY` with access
 
 Install [Subfinder](https://docs.projectdiscovery.io/opensource/subfinder/install) and [jsluice](https://github.com/BishopFox/jsluice) on the server's `PATH` (`deploy/setup.sh` pins both). Subfinder aggregates passive providers, including certificate-transparency sources; an empty scan triggers a bounded direct crt.sh fallback. Results are cached per domain for a day; scanning is not repeated during five-minute monitoring checks. Jsluice analyzes saved JavaScript locally, without requesting the extracted endpoints.
 
+Optionally install [urlfinder](https://github.com/projectdiscovery/urlfinder) on the server's `PATH` (`deploy/setup.sh` pins it). If the submitted page cannot be monitored, it suggests up to two recognizable same-origin app or documentation paths from public archives. Those paths share the existing inspection budget and public-network checks. Provider queries are limited to two per second and 15 seconds, and successful results are cached for a day. URL discovery never runs during polling; an unavailable tool leaves the existing discovery flow intact.
+
 ## Local preview
 
 Run `HOST=127.0.0.1 PORT=3088 POLL_ENABLED=0 DATABASE_PATH=/path/to/local-copy.sqlite bun run dev` to browse a local database snapshot without background polling. The UI marks it as paused preview data. Submission accepts a bare domain such as `example.com`; a name is not required. Discovery still requires the server API key described above.
@@ -61,9 +63,9 @@ Run `HOST=127.0.0.1 PORT=3088 POLL_ENABLED=0 DATABASE_PATH=/path/to/local-copy.s
 
 Enter a website URL (with or without `https://`), then check or uncheck the discovered URLs. At least one URL is required. **Visitors cannot change discovery or monitoring limits.** Both are owned by the server in `config.json`: review up to **12 candidate domains** and monitor at most **3 domains** per company by default. Operators edit that file and restart the app; there are no environment variables or public settings endpoints for these limits.
 
-Discovery uses passive Subfinder results—not homepage links. When the inventory exceeds the inspection budget, Luna first shortlists hostnames for distinct production apps and API documentation rather than taking the first names alphabetically. This is only a shortlist, not evidence a host is live. The submitted website always retains one inspection slot. The public-suffix list keeps unrelated sites separate, including private suffixes such as `github.io`.
+Discovery uses passive Subfinder results for subdomains. It can also inspect up to two recognizable same-origin app or documentation links from the submitted page. If that page is unobservable, urlfinder may suggest fallback paths. These checks share the existing inspection budget; visitors can select one URL per domain. When the inventory exceeds the inspection budget, Luna first shortlists hostnames for distinct production apps and API documentation rather than taking the first names alphabetically. This is only a shortlist, not evidence a host is live. The submitted website always retains one inspection slot. The public-suffix list keeps unrelated sites separate, including private suffixes such as `github.io`.
 
-Each shortlisted host is inspected within the 12-host budget. For roots returning 404 or no observable first-party JavaScript, discovery also tries `/openapi.json` and `/swagger.json`, respecting each path's robots policy. Only pages with observable first-party scripts or valid public API schemas qualify; ordinary JSON responses do not. Luna's Decisions API then asks one yes/no question per usable candidate: **is this a useful public website, application, or API schema to monitor?** Internal dashboards, operational tools, login screens, and public API definitions are eligible. Suggestions with a yes probability of at least 70% are prechecked up to the monitoring cap. You can check or uncheck any inspectable URL before confirming. Hostname shortlisting uses one structured Responses call only when needed; final page selection still uses Decisions.
+Each shortlisted host is inspected within the 12-host budget. For roots returning 404 or no observable first-party JavaScript, discovery also tries `/openapi.json` and `/swagger.json`. Only pages with observable first-party scripts or valid public API schemas qualify; ordinary JSON responses do not. Luna's Decisions API then asks one yes/no question per usable candidate: **is this a useful public website, application, or API schema to monitor?** Internal dashboards, operational tools, login screens, and public API definitions are eligible. Suggestions with a yes probability of at least 70% are prechecked up to the monitoring cap. You can check or uncheck any inspectable URL before confirming. Hostname shortlisting uses one structured Responses call only when needed; final page selection still uses Decisions.
 
 Each selected URL gets its own baseline and polling state. Company release counts deduplicate identical fingerprints across its URLs. Profiles show the actual monitored URLs; release evidence retains the originating URL. Passive sources are incomplete and can contain stale names; only inspected public pages can be selected.
 
@@ -114,7 +116,6 @@ The interface is plain HTML, CSS, and a small browser script. It pairs self-host
 | Database                          | Built-in `bun:sqlite`, with WAL                   |
 | Website                           | HTML, CSS, browser JavaScript — no frontend build |
 | IP classification                 | `ipaddr.js`                                       |
-| Robots rules                      | `robots-parser`                                   |
 | API rate limits                   | `rate-limiter-flexible`, in memory                |
 | HTML attribute decoding           | `entities`                                        |
 | URL discovery / domain boundaries | `cheerio`, `tldts`                                |
@@ -122,7 +123,7 @@ The interface is plain HTML, CSS, and a small browser script. It pairs self-host
 | Bounded discovery concurrency     | `p-limit`                                         |
 | HTTPS                             | Caddy                                             |
 
-The observer spreads checks across five-minute windows, limits concurrent work, respects robots disallows, and backs off failures. Private and reserved destinations are blocked, DNS is pinned to the validated address, and fetches have byte/time limits. Slow or unobservable sites show their actual monitoring status.
+The observer spreads checks across five-minute windows, limits concurrent work, and backs off failures. It does not consult robots.txt. Private and reserved destinations are blocked, DNS is pinned to the validated address, and fetches have byte/time limits. Slow or unobservable sites show their actual monitoring status.
 
 Submission limits: **one per IP per minute**, **100 new sites per day**. Read APIs: **120 requests per IP per minute**. In-memory limits reset on restart; there's no Redis or distributed rate-limit service.
 
@@ -132,7 +133,7 @@ Submission limits: **one per IP per minute**, **100 new sites per day**. Read AP
 ```text
 src/
   db.ts          Schema and release state transitions
-  network.ts     Public HTTP fetching, DNS checks, robots rules
+  network.ts     Public HTTP fetching and DNS checks
   detect.ts      Script discovery and fingerprints
   poller.ts      Scheduling, confirmations, failure backoff
   import-yc.ts   Import only eligible recent YC companies

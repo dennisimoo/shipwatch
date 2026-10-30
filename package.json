@@ -24,7 +24,6 @@
     "openai": "^7.45.1",
     "p-limit": "^7.3.3",
     "rate-limiter-flexible": "^11.2.3",
-    "robots-parser": "^3.0.1",
     "tldts": "^7.4.19",
     "uplot": "^1.6.32"
   }

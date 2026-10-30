@@ -102,7 +102,6 @@ test("snapshots ignore rebuild metadata, follow actual child changes, and reuse 
   const cached = await snapshot("https://example.com/", changed.assets);
   expect(cached.fingerprint).toBe(changed.fingerprint);
   expect(seen.some((url) => url.includes("other.com"))).toBe(false);
-  await expect(snapshot("https://example.com/", {}, async (url) => !url.includes("child-"))).rejects.toThrow("robots");
 });
 
 test("historical repair preserves original evidence and only restores verified content transitions", async () => {
@@ -125,7 +124,7 @@ test("historical repair preserves original evidence and only restores verified c
     );
   }
   mockFetch = spyOn(network, "fetchPublic").mockImplementation(async (url) => {
-    const body = url.endsWith("/robots.txt") ? "" : bodies.get(url)!;
+    const body = bodies.get(url)!;
     if (body === undefined) throw new Error("Unexpected historical fixture URL: " + url);
     return { url, body, status: 200, headers: { "content-type": "application/javascript" }, bytes: body.length };
   });

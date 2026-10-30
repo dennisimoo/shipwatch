@@ -8,17 +8,14 @@ const { comparison, saveBody } = await import("../src/analysis");
 const { db, recordSnapshot } = await import("../src/db");
 const { inspect } = await import("../src/discovery");
 
-test("an API root with no page can suggest its public schema, respecting robots", async () => {
-  let blocked = false;
+test("an API root with no page can suggest its public schema", async () => {
   const fetched: string[] = [];
   const fetch = spyOn(network, "fetchPublic").mockImplementation(async (url) => {
     const path = new URL(url).pathname;
     fetched.push(path);
-    const robots = path === "/robots.txt";
     const schema = path === "/openapi.json";
-    const body = robots ? `User-agent: *\n${blocked ? "Disallow: /openapi.json\nDisallow: /swagger.json" : "Allow: /"}`
-      : schema ? '{"openapi":"3.1.0","paths":{"/reports":{"post":{}}}}' : "Not found";
-    return { url, body, status: robots || schema ? 200 : 404,
+    const body = schema ? '{"openapi":"3.1.0","paths":{"/reports":{"post":{}}}}' : "Not found";
+    return { url, body, status: schema ? 200 : 404,
       headers: { "content-type": schema ? "application/json" : "text/plain" }, bytes: body.length };
   });
   try {
@@ -26,11 +23,7 @@ test("an API root with no page can suggest its public schema, respecting robots"
     expect(result.candidate.url).toBe("http://example.com/openapi.json");
     expect(result.candidate.title).toBe("Public API schema");
     expect(result.candidate.error).toBe(null);
-    fetched.length = 0;
-    blocked = true;
-    expect((await inspect("http://example.com/", "Passive subdomain discovery")).candidate.error).not.toBe(null);
-    expect(fetched).not.toContain("/openapi.json");
-    expect(fetched).not.toContain("/swagger.json");
+    expect(fetched).not.toContain("/robots.txt");
   } finally { fetch.mockRestore(); }
 });
 
@@ -77,9 +70,9 @@ test("public API schemas are captured and compared, arbitrary JSON is rejected",
     url, body, status: 200, headers: { "content-type": "application/json" }, bytes: body.length,
   }));
   try {
-    const first = await snapshot("http://example.com/openapi.json", {}, async () => true, saveBody);
+    const first = await snapshot("http://example.com/openapi.json", {}, saveBody);
     body = '{"openapi":"3.1.0","paths":{"/users":{"get":{}},"/reports":{"post":{}}}}';
-    const second = await snapshot("http://example.com/openapi.json", {}, async () => true, saveBody);
+    const second = await snapshot("http://example.com/openapi.json", {}, saveBody);
     expect(first.fingerprint).not.toBe(second.fingerprint);
     expect(comparison(JSON.parse(first.evidence), JSON.parse(second.evidence)).patch).toContain("/reports");
     body = '{"timestamp":123}';
