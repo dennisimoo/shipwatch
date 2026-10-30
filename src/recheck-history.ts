@@ -1,6 +1,5 @@
 import { db } from "./db";
 import { inspectBundles, type Asset } from "./detect";
-import { fetchPublic, robotsAllowed } from "./network";
 import { saveBody, analyzeNext } from "./analysis";
 import pLimit from "p-limit";
 
@@ -18,19 +17,6 @@ export async function recheckHistory(apply: boolean, companyId: string | null = 
     JOIN releases r ON r.company_id=c.id
     WHERE c.enabled=1 AND (? OR r.fingerprint NOT LIKE 'content-v3:%')
       AND (? IS NULL OR c.id=?) ORDER BY c.name`).all(analyze ? 1 : 0, companyId, companyId) as { id: string; name: string }[];
-  const robots = new Map<string, string>();
-  async function allowed(address: string) {
-    const target = new URL(address);
-    if (!robots.has(target.origin)) {
-      const response = await fetchPublic(target.origin + "/robots.txt", {}, 128000);
-      if (response.status >= 500 || response.status === 429)
-        throw new Error("Robots policy temporarily unavailable");
-      robots.set(target.origin, response.status === 401 || response.status === 403
-        ? "User-agent: *\nDisallow: /"
-        : response.status >= 400 ? "" : response.body);
-    }
-    return robotsAllowed(robots.get(target.origin)!, target.pathname + target.search);
-  }
   const limit = pLimit(2);
   const reports = await Promise.all(companies.map((company) => limit(async () => {
     const releases = db.query(`SELECT id,company_id,url,detected_at,confirmed_at,evidence
@@ -60,7 +46,7 @@ export async function recheckHistory(apply: boolean, companyId: string | null = 
           target.searchParams.set("dpl", [...versions][0]);
           return target.href;
         };
-        const snapshot = await inspectBundles(release.url, saved.scripts.map(pinned), assets, allowed, 0, null,
+        const snapshot = await inspectBundles(release.url, saved.scripts.map(pinned), assets, 0, null,
           apply && analyze ? saveBody : undefined);
         if (saved.content.some((entry) => snapshot.assets[pinned(entry.url)]?.hash !== entry.hash))
           throw new Error("Historical asset no longer matches its recorded hash");

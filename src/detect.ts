@@ -111,14 +111,11 @@ export async function extractScripts(
 export async function snapshot(
   url: string,
   previous: Record<string, Asset>,
-  allow: (url: string) => Promise<boolean> = async () => true,
   saveBody?: (hash: string, body: string) => void,
 ): Promise<Snapshot> {
   const page = await fetchPublic(url, { Accept: "text/html, application/json;q=0.9" });
   if (page.status !== 200)
     throw new Error(`Website returned HTTP ${page.status}`);
-  if (!(await allow(page.url)))
-    throw new Error("Monitoring disallowed by robots.txt");
   if (apiSchema(page.body)) {
     const digest = hash(page.body);
     const contentHash = hash(JSON.stringify(JSON.parse(page.body)));
@@ -132,14 +129,13 @@ export async function snapshot(
   if (!scripts.length)
     throw new Error("No observable first-party JavaScript on this page");
   const build = page.body.match(/"buildId"\s*:\s*"([^"<>]{1,200})"/)?.[1] || null;
-  return inspectBundles(page.url, scripts, previous, allow, page.bytes, build, saveBody);
+  return inspectBundles(page.url, scripts, previous, page.bytes, build, saveBody);
 }
 
 export async function inspectBundles(
   url: string,
   scripts: string[],
   previous: Record<string, Asset> = {},
-  allow: (url: string) => Promise<boolean> = async () => true,
   initialBytes = 0,
   build: string | null = null,
   saveBody?: (hash: string, body: string) => void,
@@ -150,8 +146,6 @@ export async function inspectBundles(
   const queued = new Set(queue);
   for (let index = 0; index < queue.length && Object.keys(assets).length < assetLimit; index++) {
     const script = queue[index];
-    if (!(await allow(script)))
-      throw new Error("Script monitoring disallowed by robots.txt");
     const old = previous[script];
     const headers: Record<string, string> = {};
     const currentCache = old?.method === "content-v3.1";
@@ -161,7 +155,6 @@ export async function inspectBundles(
     const asset = await fetchPublic(script, headers, Math.min(5_000_000, byteLimit - bytes));
     bytes += asset.bytes;
     if (!sameSite(url, asset.url)) throw new Error("Bundle redirected outside the website's domain");
-    if (!(await allow(asset.url))) throw new Error("Bundle monitoring disallowed by robots.txt");
     if (asset.status === 304 && currentCache) assets[script] = old;
     else if (
       asset.status === 200 &&

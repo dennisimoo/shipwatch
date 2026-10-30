@@ -4,9 +4,10 @@ import pLimit from "p-limit";
 import { randomBytes } from "node:crypto";
 import { db, now } from "./db";
 import { extractScripts, hash } from "./detect";
-import { apiSchema, fetchPublic, normalizeUrl, robotsAllowed } from "./network";
+import { apiSchema, fetchPublic, normalizeUrl, sameSite } from "./network";
 import config from "../config.json";
 import { scanSubdomains } from "./subdomains";
+import { fallbackPaths, passivePaths } from "./passive-urls";
 
 export const discoveryDefaults = Object.freeze(config.discovery);
 export const discoveryMaximums = { domainLimit: 10, candidateLimit: 30 };
@@ -70,21 +71,27 @@ export function pageContent(html: string) {
 export async function inspect(
   url: string,
   source: string,
-): Promise<{ candidate: Candidate }> {
+  origin?: string,
+): Promise<{ candidate: Candidate; links?: string[]; blocked?: boolean; pageOrigin?: string }> {
+  let links: string[] = [];
+  let blocked = false;
+  let pageOrigin: string | undefined;
   try {
     const target = normalizeUrl(url);
-    const robots = await fetchPublic(`${target.origin}/robots.txt`, {}, 128000);
-    if (robots.status >= 500 || robots.status === 429)
-      throw new Error("Robots policy unavailable");
-    if (
-      [401, 403].includes(robots.status) ||
-      (robots.status === 200 &&
-        !robotsAllowed(robots.body, target.pathname + target.search))
-    )
-      throw new Error("Disallowed by robots.txt");
-    const response = await fetchPublic(url, { Accept: "text/html, application/json;q=0.9" });
+    const response = await fetchPublic(url, { Accept: "text/html, application/json;q=0.9" }, undefined, undefined,
+      origin ? (destination) => destination.origin === origin : undefined);
+    blocked = response.status === 401 || response.status === 403 || response.status === 429 || response.status >= 500;
+    if (sameSite(response.url, target.href)) pageOrigin = new URL(response.url).origin;
     const schemaDocument = apiSchema(response.body);
     const html = String(response.headers["content-type"]).includes("text/html");
+    if (html && response.status === 200 && sameSite(response.url, target.href)) {
+      const page = load(response.body);
+      const addresses: string[] = [];
+      page("a[href]").each((_index, element) => {
+        try { addresses.push(new URL(page(element).attr("href")!, response.url).href); } catch {}
+      });
+      links = fallbackPaths(addresses.join("\n"), response.url);
+    }
     const scripts = html && !schemaDocument ? await extractScripts(response.body, response.url) : [];
     if (source === "Passive subdomain discovery" &&
       (response.status === 404 || (response.status === 200 && !schemaDocument && !scripts.length))) {
@@ -99,25 +106,13 @@ export async function inspect(
     )
       throw new Error(`Page unavailable (HTTP ${response.status})`);
     if (!schemaDocument && !scripts.length) throw new Error("No observable first-party JavaScript or public API schema");
-    if (new URL(response.url).origin !== target.origin) {
-      const redirectedRobots = await fetchPublic(
-        `${new URL(response.url).origin}/robots.txt`,
-        {},
-        128000,
-      );
-      if (
-        redirectedRobots.status >= 500 ||
-        redirectedRobots.status === 429 ||
-        [401, 403].includes(redirectedRobots.status) ||
-        (redirectedRobots.status === 200 &&
-          !robotsAllowed(redirectedRobots.body, new URL(response.url).pathname))
-      )
-        throw new Error("Redirect destination robots policy blocks inspection");
-    }
     const page = schemaDocument
       ? { title: "Public API schema", text: JSON.stringify(JSON.parse(response.body)).slice(0, 5000) }
       : pageContent(response.body);
     return {
+      links,
+      blocked,
+      pageOrigin,
       candidate: {
         url: response.url,
         source,
@@ -129,6 +124,9 @@ export async function inspect(
     };
   } catch (error) {
     return {
+      links,
+      blocked,
+      pageOrigin,
       candidate: {
         url,
         source,
@@ -143,6 +141,7 @@ export async function inspect(
 }
 
 export function recommend(candidates: Candidate[], limit: number) {
+  const hosts = new Set<string>();
   return candidates
     .filter(
       (candidate) =>
@@ -151,6 +150,12 @@ export function recommend(candidates: Candidate[], limit: number) {
         candidate.probability >= 0.7,
     )
     .sort((left, right) => right.probability! - left.probability!)
+    .filter((candidate) => {
+      const hostname = new URL(candidate.url).hostname;
+      if (hosts.has(hostname)) return false;
+      hosts.add(hostname);
+      return true;
+    })
     .slice(0, limit)
     .map((candidate) => candidate.url);
 }
@@ -187,18 +192,36 @@ export async function discover(
     scanSubdomains(url),
   ]);
   const candidates: Candidate[] = [first.candidate];
+  let inspected = 1;
+  if (options.candidateLimit > 1 && !first.blocked) {
+    try {
+      const origin = first.pageOrigin ?? new URL(url).origin;
+      const linked = (first.links ?? []).filter((path) => path !== first.candidate.url);
+      const archived = first.candidate.error ? await passivePaths(origin) : [];
+      for (const path of [...new Set([...linked, ...archived])].slice(0, 2)) {
+        if (inspected >= options.candidateLimit) break;
+        inspected++;
+        const source = linked.includes(path) ? "Linked public page" : "Passively discovered page";
+        const fallback = await inspections(() => inspect(path, source, origin));
+        if (fallback.blocked) break;
+        if (!fallback.candidate.error && new URL(fallback.candidate.url).origin === origin) {
+          if (first.candidate.error) { candidates[0] = fallback.candidate; break; }
+          else if (!candidates.some((candidate) => candidate.url === fallback.candidate.url)) candidates.push(fallback.candidate);
+        }
+      }
+    } catch (error) { console.warn("passive-url-discovery", error); }
+  }
   const visited = new Set([
     new URL(url).hostname,
     new URL(first.candidate.url).hostname,
   ]);
   const client = new OpenAI({ timeout: 30000, maxRetries: 1 });
-  const ranked = await shortlist(hosts.filter((hostname) => !visited.has(hostname)), url, options.candidateLimit - 1, client);
+  const ranked = await shortlist(hosts.filter((hostname) => !visited.has(hostname)), url, options.candidateLimit - inspected, client);
   const pending = ranked.map((hostname) => ({
     url: `https://${hostname}/`, source: "Passive subdomain discovery",
   }));
   const discovered = new Set([...hosts, ...visited]).size;
   const deadline = Date.now() + 60000;
-  let inspected = 1;
   while (
     pending.length &&
     inspected < options.candidateLimit &&
@@ -234,7 +257,7 @@ export async function discover(
   const usable = candidates.filter((candidate) => !candidate.error);
   if (!usable.length)
     throw new Error(
-      "No public pages could be inspected. Check the website URL or robots policy.",
+      "No public pages could be inspected. Check the website URL or try again later.",
     );
   const result = await client.decisions.create({
     model: "gpt-6-luna",

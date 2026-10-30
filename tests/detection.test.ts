@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { extractScripts, hash } from "../src/detect";
-import { apiSchema, normalizeUrl, publicAddress, robotsAllowed, sameSite } from "../src/network";
+import { apiSchema, normalizeUrl, publicAddress, sameSite } from "../src/network";
 
 describe("public website boundary", () => {
   test("blocks private, metadata, mapped IPv6, and reserved destinations", () => {
@@ -65,27 +65,5 @@ describe("script discovery", () => {
     ).toEqual(["https://example.com/main.js?v=1&x=2"]);
     expect(hash("stable")).toBe(hash("stable"));
     expect(hash("stable")).not.toBe(hash("changed"));
-  });
-});
-
-describe("robots rules", () => {
-  test("uses specific bot rules and longest matching path", () => {
-    expect(robotsAllowed("User-agent: *\nDisallow: /", "/")).toBe(false);
-    expect(
-      robotsAllowed(
-        "User-agent: *\nDisallow: /private\nAllow: /private/public",
-        "/private/public/app.js",
-      ),
-    ).toBe(true);
-    expect(
-      robotsAllowed(
-        "User-agent: *\nDisallow: /\nUser-agent: Shipwatch\nAllow: /",
-        "/",
-      ),
-    ).toBe(true);
-    expect(
-      robotsAllowed("User-agent: *\nDisallow: /*.js$", "/assets/app.js"),
-    ).toBe(false);
-    expect(robotsAllowed("User-agent: *\nDisallow:", "/")).toBe(true);
   });
 });

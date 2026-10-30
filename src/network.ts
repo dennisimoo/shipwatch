@@ -2,7 +2,6 @@ import { lookup } from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
 import ipaddr from "ipaddr.js";
-import robotsParser from "robots-parser";
 import { getDomain } from "tldts";
 
 export function sameSite(left: string, right: string): boolean {
@@ -57,8 +56,10 @@ export async function fetchPublic(
   headers: Record<string, string> = {},
   limit = 2_000_000,
   redirects = 0,
+  scope?: (url: URL) => boolean,
 ): Promise<PageResponse> {
   const target = normalizeUrl(input);
+  if (scope && !scope(target)) throw new Error("Redirect outside the allowed website");
   const hostname = target.hostname.replace(/^\[|\]$/g, "");
   const addresses = await Promise.race([
     lookup(hostname, { all: true }),
@@ -125,16 +126,8 @@ export async function fetchPublic(
       headers,
       limit,
       redirects + 1,
+      scope,
     );
   }
   return response;
-}
-
-export function robotsAllowed(text: string, path: string): boolean {
-  return (
-    robotsParser("https://robots.invalid/robots.txt", text).isAllowed(
-      `https://robots.invalid${path}`,
-      "Shipwatch",
-    ) !== false
-  );
 }

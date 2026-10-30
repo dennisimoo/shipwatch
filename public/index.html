@@ -215,11 +215,12 @@
           uncertain, and unclassified observations are excluded from public histories.
           AI classifications can be wrong.
         </p>
-        <h2>Finding subdomains</h2>
+        <h2>Finding websites to watch</h2>
         <p>
-          Subfinder finds subdomains through passive sources, including certificate transparency—not homepage links.
-          A model shortlists hosts, then reviews inspected apps and public API schemas; you choose what
-          gets monitored. Discovery is bounded and can miss unlisted or private apps.
+          Passive sources suggest subdomains. Links on the submitted page, and public archives when
+          it cannot be monitored, can suggest a few app or documentation paths on the same site.
+          A model reviews the inspected pages and public
+          API schemas; you choose what gets monitored. Discovery is bounded and can miss pages.
         </p>
         <h2>API changes</h2>
         <p>
@@ -229,8 +230,8 @@
         </p>
         <h2>Why a website may not be checked successfully</h2>
         <p>
-          Some sites have no observable first-party JavaScript, disallow checks
-          in robots.txt, block requests, or return errors. Failed checks retry
+          Some sites have no observable first-party JavaScript, block requests,
+          or return errors. Failed checks retry
           with backoff. A domain count means selected monitored hosts—not all
           subdomains a company owns.
         </p>
@@ -291,8 +292,7 @@
         </button>
         <p id="submission-message" role="status"></p>
         <p class="fine-print">
-          Public pages only. We respect robots.txt and never sign
-          in.
+          Public pages only. Shipwatch does not consult robots.txt and never signs in.
         </p>
       </form>
     </dialog>
