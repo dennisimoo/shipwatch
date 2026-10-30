@@ -1,6 +1,7 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import OpenAI from "openai";
 import { gunzipSync } from "node:zlib";
+import * as runtime from "../src/runtime";
 
 process.env.DATABASE_PATH = ":memory:";
 const { db, recordSnapshot } = await import("../src/db");
@@ -90,13 +91,13 @@ test("a large SDK diff does not hide a small inspectable application change", ()
   expect(input.patch.length).toBeLessThan(400000);
 });
 
-test("exact URLs pair before hash-collapsed groups and renamed contents pair safely", () => {
+test("exact URLs pair without guessing unsupported anonymous renames", () => {
   const before = evidence('const stable=1;', "https://example.com/_next/static/chunks/123456abcdef.js?dpl=dpl_old");
   before.content.push(...evidence('const feature=1;', "https://example.com/_next/static/chunks/abcdef123456.js?dpl=dpl_old").content);
   const after = evidence('const stable=1;', "https://example.com/_next/static/chunks/123456abcdef.js?dpl=dpl_new");
   after.content.push(...evidence('const feature=2;', "https://example.com/_next/static/chunks/fedcba654321.js?dpl=dpl_new").content);
   const result = comparison(before, after);
-  expect(result.unseenChanged).toBe(false);
+  expect(result.unseenChanged).toBe(true);
   expect(result.patch).toContain("feature = 2");
   expect(result.patch).not.toContain("stable = 1");
   const renamed = evidence('const stable=1;', "https://example.com/_next/static/chunks/0m9abz2od-1_1.js");
@@ -129,11 +130,22 @@ test("Turbopack WebAssembly loading is not mistaken for an unresolved JS chunk m
   const after = evidence(source + 'const version=2;');
   expect(comparison(before, after).unseenChanged).toBe(false);
   const webpack = 'runtime.u=chunk=>"/static/"+chunk+".js";';
-  expect(comparison(evidence(webpack + 'const version=1;'), evidence(webpack + 'const version=2;')).unseenChanged).toBe(true);
+  expect(comparison(evidence(webpack + 'const version=1;'), evidence(webpack + 'const version=2;')).unseenChanged).toBe(false);
+  expect(comparison(evidence(webpack), evidence(webpack.replace("/static/", "/updated/"))).unseenChanged).toBe(true);
 });
 
 test("uncaptured names ignore deployment parameters, never changed content filenames", () => {
   const before = { ...evidence("const stable=1;"), uninspected: ["https://example.com/chunk-ABCDEFGH.js?dpl=dpl_one"] };
   expect(comparison(before, { ...before, uninspected: ["https://example.com/chunk-ABCDEFGH.js?dpl=dpl_two"] }).unseenChanged).toBe(false);
   expect(comparison(before, { ...before, uninspected: ["https://example.com/chunk-IJKLMNOP.js?dpl=dpl_two"] }).unseenChanged).toBe(true);
+});
+
+test("unsupported loader syntax retains other evidence and marks the comparison incomplete", () => {
+  const inspect = spyOn(runtime, "changedChunkLoader").mockImplementation(() => { throw new SyntaxError("Unsupported syntax"); });
+  try {
+    const result = comparison(evidence("const feature=false;"), evidence("const feature=true;"));
+    expect(result.patch).toContain("feature = true");
+    expect(result.unseenChanged).toBe(true);
+    expect(result.reasons).toContain("Runtime loader syntax could not be inspected");
+  } finally { inspect.mockRestore(); }
 });

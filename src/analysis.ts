@@ -1,10 +1,12 @@
 import OpenAI from "openai";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { structuredPatch } from "diff";
 import { db, now } from "./db";
-import { assetIdentity, hash, normalizeContent } from "./detect";
+import { hash, normalizeContent } from "./detect";
 import { apiChanges } from "./api-references";
 import { apiSchema } from "./network";
+import { canonicalUrl, pairBundles, type BundleEntry } from "./matching";
+import { codeDiff } from "./code-diff";
+import { changedChunkLoader } from "./runtime";
 
 export interface Analysis {
   classification: "application" | "build-only" | "uncertain";
@@ -16,7 +18,7 @@ interface Evidence {
 }
 const printer = new Bun.Transpiler({ loader: "js", minifyWhitespace: false });
 export const analysisModel = "gpt-6-luna";
-export const analysisVersion = 2;
+export const analysisVersion = 3;
 
 export function saveBody(digest: string, body: string) {
   if (hash(body) !== digest) throw new Error("Bundle archive hash mismatch");
@@ -31,113 +33,49 @@ function body(digest: string) {
 }
 
 export function comparison(before: Evidence, after: Evidence): { patch: string; unseenChanged: boolean; reasons?: string[] } {
-  type Entry = Evidence["content"][number];
-  const previous = new Set(before.content);
-  const current = new Set(after.content);
-  const pairs: [Entry | undefined, Entry | undefined][] = [];
   const reasons = new Set<string>();
-  const canonicalUrl = (address: string) => {
-    const url = new URL(address);
-    url.searchParams.delete("dpl");
-    url.hash = "";
-    return url.href;
-  };
-  const exactUrl = (entry: Entry) => canonicalUrl(entry.url);
   let unseenChanged = JSON.stringify((before.uninspected ?? []).map(canonicalUrl).sort()) !==
     JSON.stringify((after.uninspected ?? []).map(canonicalUrl).sort());
   if (unseenChanged) reasons.add("The uncaptured asset inventory changed");
-  if (new Set(before.content.map(exactUrl)).size !== before.content.length ||
-    new Set(after.content.map(exactUrl)).size !== after.content.length) {
+  const sources = new Map<BundleEntry, string>();
+  const source = (entry: BundleEntry) => {
+    if (!sources.has(entry)) {
+      const normalized = normalizeContent(body(entry.hash), entry.url)
+        .replace(/([?&]dpl=)dpl_[A-Za-z0-9]+/g, "$1VERCEL_DEPLOYMENT_ID");
+      sources.set(entry, apiSchema(normalized) ? JSON.stringify(JSON.parse(normalized), null, 2)
+        : /\.css(?:\?|$)/.test(entry.url) ? normalized : printer.transformSync(normalized));
+    }
+    return sources.get(entry)!;
+  };
+  const { pairs, ambiguous, duplicateUrls } = pairBundles(before.content, after.content, source);
+  if (duplicateUrls) {
     unseenChanged = true;
     reasons.add("Duplicate asset URLs in saved evidence");
   }
-  const sources = new Map<Entry, string>();
-  const normalized = (entry: Entry) => {
-    if (!sources.has(entry)) sources.set(entry, normalizeContent(body(entry.hash), entry.url)
-      .replace(/([?&]dpl=)dpl_[A-Za-z0-9]+/g, "$1VERCEL_DEPLOYMENT_ID"));
-    return sources.get(entry)!;
-  };
-  const match = (key: (entry: Entry) => string, equivalent = false) => {
-    const group = (entries: Set<Entry>) => {
-      const groups = new Map<string, Entry[]>();
-      for (const entry of entries) {
-        const identity = key(entry);
-        groups.set(identity, [...groups.get(identity) ?? [], entry]);
-      }
-      return groups;
-    };
-    const oldGroups = group(previous);
-    const newGroups = group(current);
-    for (const [identity, oldEntries] of oldGroups) {
-      const newEntries = newGroups.get(identity) ?? [];
-      if (!newEntries.length || (!equivalent && (oldEntries.length !== 1 || newEntries.length !== 1))) continue;
-      for (let index = 0; index < Math.min(oldEntries.length, newEntries.length); index++) {
-        const old = oldEntries[index];
-        const next = newEntries[index];
-        pairs.push([old, next]);
-        previous.delete(old);
-        current.delete(next);
-      }
-    }
-  };
-  const location = (entry: Entry) => {
-    const url = new URL(exactUrl(entry));
-    return url.origin + url.pathname.slice(0, url.pathname.lastIndexOf("/") + 1) + url.search + (/\.css(?:\?|$)/.test(entry.url) ? " css" : " js");
-  };
-  match(exactUrl);
-  match((entry) => location(entry) + " " + entry.hash, true);
-  match((entry) => location(entry) + " " + hash(normalized(entry)), true);
-  const identity = (entry: Entry) => assetIdentity(entry.url)
-    .replace(/(\/_next\/static\/(?:immutable\/)?chunks\/)turbopack-[\w-]+\.js/, "$1turbopack-CONTENT.js")
-    .replace(/(\/_next\/static\/(?:immutable\/)?chunks\/)(?=[\w-]*\d)[\w-]{12,64}\.js/, "$1CONTENT.js");
-  match(identity);
-  const remaining = new Set([...previous].map(identity));
-  if ([...current].some((entry) => remaining.has(identity(entry)))) {
+  if (ambiguous) {
     unseenChanged = true;
     reasons.add("Some renamed assets could not be paired uniquely");
   }
-  pairs.push(...[...previous].map((entry): [Entry, undefined] => [entry, undefined]),
-    ...[...current].map((entry): [undefined, Entry] => [undefined, entry]));
   const chunks: string[] = [];
   for (const [old, next] of pairs) {
     if (old?.hash === next?.hash) continue;
-    const format = (entry: typeof old) => {
-      if (!entry) return "";
-      const source = normalized(entry);
-      if (apiSchema(source)) return JSON.stringify(JSON.parse(source), null, 2);
-      return /\.css(?:\?|$)/.test(entry.url) ? source : printer.transformSync(source);
-    };
-    const oldSource = format(old);
-    const newSource = format(next);
+    const oldSource = old ? source(old) : "";
+    const newSource = next ? source(next) : "";
     if (oldSource === newSource) continue;
-    const runtime = (oldSource + newSource).replace(
-      /\.u\s*=\s*function\s*\([^)]*\)\s*\{\s*return\s+[\w$]+\.loadWebAssemblyModule\([^{}]*\);\s*\}/g, "",
-    );
-    if (/\.u\s*=/.test(runtime)) {
-      unseenChanged = true;
-      reasons.add("Changed runtime may reference uncaptured dynamic chunks");
+    const address = next?.url ?? old!.url;
+    if (!/\.css(?:\?|$)/.test(address) && !apiSchema(oldSource) && !apiSchema(newSource)) {
+      try {
+        if (changedChunkLoader(oldSource, newSource)) {
+          unseenChanged = true;
+          reasons.add("Changed runtime may reference uncaptured dynamic chunks");
+        }
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        unseenChanged = true;
+        reasons.add("Runtime loader syntax could not be inspected");
+      }
     }
-    const oldFile = old ? exactUrl(old) : "(added)";
-    const newFile = next ? exactUrl(next) : "(removed)";
-    const difference = structuredPatch(oldFile, newFile, oldSource, newSource, "before", "after", {
-      context: 3, timeout: 100, maxEditLength: 10000,
-    });
-    if (difference) {
-      for (const hunk of difference.hunks) chunks.push(JSON.stringify({ oldFile, newFile,
-        hunk: { ...hunk, lines: hunk.lines.map((line) => line.startsWith(" ") && line.length > 2000
-          ? ` [unchanged context omitted: ${line.length - 1} characters]` : line) },
-      }) + "\n");
-    } else {
-      const oldLines = oldSource.split("\n");
-      const newLines = newSource.split("\n");
-      let start = 0;
-      while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) start++;
-      let oldEnd = oldLines.length;
-      let newEnd = newLines.length;
-      while (oldEnd > start && newEnd > start && oldLines[oldEnd - 1] === newLines[newEnd - 1]) { oldEnd--; newEnd--; }
-      chunks.push(JSON.stringify({ oldFile, newFile, startLine: start + 1,
-        before: oldLines.slice(start, oldEnd).join("\n"), after: newLines.slice(start, newEnd).join("\n") }) + "\n");
-    }
+    chunks.push(...codeDiff(old ? canonicalUrl(old.url) : "(added)", next ? canonicalUrl(next.url) : "(removed)", oldSource, newSource));
   }
   let patch = "";
   for (const chunk of chunks.sort((left, right) => left.length - right.length)) {

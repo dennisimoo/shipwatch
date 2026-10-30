@@ -2,6 +2,7 @@
 
 - Keep this a small side project: one Bun app, one SQLite database, one EC2 instance.
 - Apply ponytail: remove unnecessary work and prefer the smallest working change.
+- Fix proven root causes at their existing owner, check sibling paths for the same defect, and retain a regression test. Do not hide incomplete evidence to improve counts.
 - Prefer maintained libraries for standard plumbing such as IP classification, robots rules, and rate limiting. Use native Bun and platform APIs where they already solve the problem.
 - When adding a dependency, check the latest stable release and commit the lockfile. Do not build a custom substitute for a suitable maintained library.
 - Research with the Exa CLI first; if it fails, use web search and verify against primary sources.
