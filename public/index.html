@@ -15,11 +15,9 @@
   </head>
   <body>
     <header class="topbar">
-      <a class="wordmark" href="/" aria-label="Shipwatch home"
-        >Shipwatch<span class="beta">BETA</span></a
-      >
+      <a class="wordmark" href="/" aria-label="Shipwatch home">Shipwatch</a>
       <nav aria-label="Main navigation">
-        <a href="#leaderboard">Leaderboard</a
+        <a href="/#leaderboard">Index</a
         ><button class="text-button" id="method-button">How it works</button
         ><a
           href="https://github.com/dennisimoo/shipwatch"
@@ -33,171 +31,130 @@
       </button>
     </header>
     <main>
-      <section class="hero">
-        <div class="hero-copy">
-          <div class="eyebrow">
-            <span class="live-dot"></span> A PUBLIC OBSERVATORY FOR THE WEB
-          </div>
-          <h1>Who shipped<br />while you slept?</h1>
-          <p>
-            A small window into what’s changing on the web.<br />
-            Frontend releases across public websites, checked every five
-            minutes.
-          </p>
-          <div class="hero-foot">
-            <a class="button button-dark" href="#leaderboard"
-              >Explore the index</a
-            >
-            <button class="text-button" id="hero-method">How we observe</button>
-          </div>
-        </div>
-      </section>
-      <section class="stats" aria-label="Monitoring statistics">
-        <div class="stat">
-          <span class="stat-label">SITES IN THE INDEX</span
-          ><strong id="stat-sites">—</strong
-          ><span id="stat-sites-note">Loading the directory</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">RELEASES · 30 DAYS</span
-          ><strong id="stat-releases">—</strong
-          ><span>Confirmed frontend versions</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">WEEKEND RELEASES</span
-          ><strong id="stat-weekend">—</strong
-          ><span>Saturday + Sunday · UTC</span>
-        </div>
-        <div class="stat">
-          <span class="stat-label">FRESH COVERAGE</span
-          ><strong id="stat-coverage">—</strong
-          ><span id="stat-coverage-note">Successful check in the last 15m</span>
-        </div>
-      </section>
-      <section class="leaderboard-section" id="leaderboard">
-        <div class="section-intro">
-          <div>
-            <div class="eyebrow">01 / THE INDEX</div>
-            <h2>Who’s shipping.</h2>
-          </div>
-          <div class="window-switch" aria-label="Ranking period">
-            <button data-days="7">7 days</button
-            ><button data-days="30" class="selected">30 days</button>
-          </div>
-        </div>
-        <div class="table-card">
-          <div class="filters">
-            <label class="search-box"
-              ><input
-                id="search"
-                type="search"
-                placeholder="Find a website or company…"
-                aria-label="Search websites" /></label
-            ><label class="select-wrap"
-              ><select id="batch" aria-label="Filter by starter cohort">
-                <option value="">All websites</option>
-              </select></label
-            ><label class="select-wrap"
-              ><select id="sort" aria-label="Sort leaderboard">
-                <option value="releases">Most releases</option>
-                <option value="weekend">Weekend shippers</option>
-                <option value="recent">Recently shipped</option>
-              </select></label
-            >
-          </div>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th class="rank-column">#</th>
-                  <th>WEBSITE</th>
-                  <th>COHORT</th>
-                  <th class="numeric">RELEASES</th>
-                  <th class="numeric">WEEKEND</th>
-                  <th>LAST SHIP</th>
-                  <th>MONITOR</th>
-                </tr>
-              </thead>
-              <tbody id="companies">
-                <tr>
-                  <td colspan="7" class="table-empty">Loading websites…</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="table-footer">
-            <span id="results-label">Loading…</span>
-            <div>
-              <button
-                class="page-button"
-                id="previous"
-                aria-label="Previous page"
+      <div id="index-page">
+        <section class="hero">
+          <div class="hero-copy">
+            <div class="hero-wordmark">SHIPWATCH</div>
+            <h1>A closer look at who’s shipping.</h1>
+            <p>
+              Follow the websites you’re curious about. See their release
+              history, find their rhythm, and share what you notice.
+            </p>
+            <div class="hero-foot">
+              <a class="button button-dark" href="#leaderboard"
+                >Explore the index</a
               >
-                Previous</button
-              ><button class="page-button" id="next" aria-label="Next page">
-                Next
+              <button class="text-button" id="hero-method">
+                How we observe
               </button>
             </div>
           </div>
-        </div>
-        <p class="fine-print">
-          Anyone can add a public website. YC companies are simply our starting
-          set. A release is a confirmed, previously unseen frontend fingerprint.
-          It isn't a commit count or a measure of team productivity.
-          <button class="text-button" id="method-inline">
-            Read the methodology
-          </button>
+        </section>
+        <p class="index-note" id="coverage-note">
+          Establishing what we can observe…
         </p>
-      </section>
-      <div class="observatory">
-        <section class="activity-section">
+        <section class="leaderboard-section" id="leaderboard">
           <div class="section-intro">
             <div>
-              <div class="eyebrow">02 / THE SHIPPING CLOCK</div>
-              <h2>A rhythm of releases.</h2>
+              <h2>The index</h2>
             </div>
-            <span class="mono muted">LAST 30 DAYS / UTC</span>
+            <div class="window-switch" aria-label="Ranking period">
+              <button data-days="7">7 days</button
+              ><button data-days="30" class="selected">30 days</button>
+            </div>
           </div>
-          <div class="heatmap-card">
-            <div class="heatmap-head">
-              <span>MON</span><span>DAY / HOUR</span>
+          <div class="table-card">
+            <div class="filters">
+              <label class="search-box"
+                ><input
+                  id="search"
+                  type="search"
+                  placeholder="Find a website or company…"
+                  aria-label="Search websites" /></label
+              ><label class="select-wrap"
+                ><span>Collection</span
+                ><select id="batch" aria-label="Filter by starter cohort">
+                  <option value="">All websites</option>
+                </select></label
+              ><label class="select-wrap"
+                ><span>Order</span
+                ><select id="sort" aria-label="Sort leaderboard">
+                  <option value="releases">Most releases</option>
+                  <option value="weekend">Weekend shippers</option>
+                  <option value="recent">Recently shipped</option>
+                </select></label
+              >
             </div>
-            <div
-              id="heatmap"
-              class="heatmap"
-              aria-label="Release activity by weekday and hour in UTC"
-            ></div>
-            <div class="heatmap-foot">
-              <p id="heatmap-note">
-                Every square is an hour. Activity builds as monitoring runs.
-              </p>
-              <div class="legend">
-                <span>LESS</span><i></i><i></i><i></i><i></i><span>MORE</span>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th class="rank-column">#</th>
+                    <th>WEBSITE</th>
+                    <th>COLLECTION</th>
+                    <th class="numeric">RELEASES</th>
+                    <th class="numeric">WEEKEND</th>
+                    <th>LAST SHIP</th>
+                    <th>STATUS</th>
+                  </tr>
+                </thead>
+                <tbody id="companies">
+                  <tr>
+                    <td colspan="7" class="table-empty">Loading websites…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="table-footer">
+              <span id="results-label">Loading…</span>
+              <div>
+                <button
+                  class="page-button"
+                  id="previous"
+                  aria-label="Previous page"
+                >
+                  Previous</button
+                ><button class="page-button" id="next" aria-label="Next page">
+                  Next
+                </button>
               </div>
             </div>
           </div>
+          <p class="fine-print">
+            Anyone can add a public website. YC companies are simply our
+            starting set. A release is a confirmed, previously unseen frontend
+            fingerprint. It isn't a commit count or a measure of team
+            productivity.
+            <button class="text-button" id="method-inline">
+              Read the methodology
+            </button>
+          </p>
         </section>
-        <section class="signals-section" aria-label="Latest release signals">
-          <div class="radar-card">
-            <div class="card-heading">
-              <span><span class="live-dot"></span> 03 / FIELD NOTES</span
-              ><span class="mono muted">LATEST RELEASES</span>
-            </div>
-            <div id="feed" class="feed">
-              <div class="empty-feed">
-                <strong>Listening for the next ship.</strong>
-                <p>
-                  New releases appear here after confirmation.<br />No
-                  backfilled or estimated activity.
-                </p>
+        <div class="observatory">
+          <section class="signals-section" aria-label="Latest release signals">
+            <div class="radar-card">
+              <div class="card-heading">
+                <h2>Recently observed</h2>
+              </div>
+              <div id="feed" class="feed">
+                <div class="empty-feed">
+                  <strong>Listening for the next ship.</strong>
+                  <p>
+                    New releases appear here after confirmation.<br />No
+                    backfilled or estimated activity.
+                  </p>
+                </div>
               </div>
             </div>
-            <div class="radar-footer">
-              <span class="mono">CHECK · COMPARE · CONFIRM</span>
-            </div>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
+      <article id="company-page" hidden>
+        <a class="back-link" href="/#leaderboard">All websites</a>
+        <div id="company-detail" aria-live="polite">
+          Loading observation history…
+        </div>
+      </article>
     </main>
     <footer>
       <a class="wordmark" href="/">shipwatch</a
@@ -234,7 +191,7 @@
               type="text"
               required
               maxlength="1500"
-              placeholder="https://your-company.com" /></label
+              placeholder="https://example.com" /></label
           ><label
             >Website name <span class="muted">(optional)</span
             ><input
@@ -338,19 +295,6 @@
         are tracked without repeatedly downloading their contents. Lazy-loaded
         routes and third-party CDN assets can be missed.
       </p>
-    </dialog>
-    <dialog id="company-dialog">
-      <div class="dialog-heading">
-        <span class="eyebrow">COMPANY OBSERVATORY</span
-        ><button
-          class="close-button"
-          data-close="company-dialog"
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </div>
-      <div id="company-detail">Loading…</div>
     </dialog>
     <div id="connection-error" class="connection-error" role="status" hidden>
       Connection interrupted. Retrying shortly.

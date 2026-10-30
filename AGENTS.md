@@ -13,3 +13,4 @@
 - Keep credentials and database files out of Git.
 - Discovery budgets and monitoring caps belong to the server in `config.json`. Never expose them as visitor-editable form fields or accept client overrides. Visitors only select discovered URLs within the cap, with at least one selected.
 - Keep the UI plain HTML/CSS with minimal browser JavaScript: editorial serif typography, restrained controls, and no decorative arrow icons.
+- Avoid boxed network-wide release totals as success metrics: growing the monitored population inflates them. Keep shareable per-website histories honest about observation gaps and partial days.

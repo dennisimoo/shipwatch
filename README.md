@@ -1,10 +1,6 @@
-<p align="center">
-  <img src="public/favicon.svg" width="52" alt="Shipwatch logo">
-</p>
+<h1 align="center">SHIPWATCH</h1>
 
-<h1 align="center">Shipwatch</h1>
-
-<p align="center"><strong>Who shipped while you slept?</strong><br>A public pulse on frontend releases across the web.</p>
+<p align="center"><strong>A closer look at who's shipping.</strong><br>A public pulse on frontend releases across the web.</p>
 
 <p align="center">
   <a href="https://shipwatch.54.219.237.10.sslip.io">Live site</a> ·
@@ -17,14 +13,15 @@
   <a href="https://github.com/dennisimoo/shipwatch/actions/workflows/check.yml"><img src="https://github.com/dennisimoo/shipwatch/actions/workflows/check.yml/badge.svg" alt="Tests and typecheck"></a>
 </p>
 
-![Shipwatch's live leaderboard, monitoring coverage, and weekday activity heatmap](docs/preview.png)
+![Shipwatch's plain-text index and website leaderboard](docs/preview.png)
 
 ## The idea
 
 Watch public JavaScript bundles every five minutes and see which websites change, how often, and when.
 
 - **Who's shipping:** 7- and 30-day leaderboards, website search, and cohort filters.
-- **When they ship:** weekend release counts and an hourly activity heatmap in UTC.
+- **When they ship:** per-website daily release graphs and weekend counts in UTC.
+- **Share a website:** permanent `/company/:id` pages with release history and a copy-link control.
 - **Show the evidence:** each company has its baseline date, check history, and release fingerprints.
 - **Bring a website:** discover linked domains, review Luna's suggestions, and check the URLs you want to monitor.
 
@@ -76,13 +73,15 @@ Public page → script URLs + content fingerprints → confirm change → SQLite
 
 Event times mean **first detected**, with the previous successful check and confirmation time preserved. Rankings cover observed events in the selected window. Company profiles show how long we've actually been watching.
 
+There is no network-wide release total presented as a success metric: adding more websites would inflate it. Profiles show a site's own daily history and releases per observed day. The rate only includes completed UTC dates with successful checks after the baseline, excluding a partial baseline date and today. Missing dates are gaps, not zeroes; a date with successful checks does not imply uninterrupted coverage. A new site with no eligible dates has no rate yet. Charts aggregate all releases in their date range, independently of the profile's 100-event log limit.
+
 **Limits:** backend-only deploys, commits, lazy-loaded routes, and scripts on unrelated CDN domains can be missed. CDN caching delays observations; multiple releases between checks can be missed; A/B tests and regional variants can introduce noise. A marketing homepage may deploy separately from the product. Weekend and hourly stats use **UTC**.
 
 ## Small on purpose
 
 **One EC2 instance. One Bun process. One SQLite database.**
 
-The interface is plain HTML, CSS, and a small browser script. Its quiet, serif-led layout uses self-hosted [Source Serif 4](https://github.com/adobe-fonts/source-serif), distributed under the included SIL Open Font License. No frontend framework or build step.
+The interface is plain HTML, CSS, and a small browser script. It pairs self-hosted [Chakra Petch](https://github.com/google/fonts/tree/main/ofl/chakrapetch) capitals with [Source Serif 4](https://github.com/adobe-fonts/source-serif), both distributed under their included SIL Open Font Licenses. Company charts use native SVG with a plain HTML data table. No frontend framework, charting dependency, or build step.
 
 | Piece                             | Choice                                            |
 | --------------------------------- | ------------------------------------------------- |

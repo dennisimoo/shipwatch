@@ -39,46 +39,15 @@ async function api(path, options) {
   if (!response.ok) throw new Error(result.error || "Request failed");
   return result;
 }
-function drawHeatmap(entries, total) {
-  const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-  const max = Math.max(1, ...entries.map((entry) => entry.count));
-  let html = "";
-  for (const day of [1, 2, 3, 4, 5, 6, 0]) {
-    html += `<span class="day-label">${days[day]}</span>`;
-    for (let hour = 0; hour < 24; hour++) {
-      const count =
-        entries.find((entry) => entry.day === day && entry.hour === hour)
-          ?.count || 0;
-      const level = count ? Math.max(1, Math.ceil((count / max) * 4)) : 0;
-      html += `<div class="heat-cell" data-level="${level}" title="${days[day]} ${String(hour).padStart(2, "0")}:00 UTC · ${count} releases" aria-label="${days[day]} ${hour}:00 UTC: ${count} releases"></div>`;
-    }
-  }
-  html += "<span></span>";
-  for (let hour = 0; hour < 24; hour++)
-    html += `<span class="hour-label">${hour % 3 === 0 ? String(hour).padStart(2, "0") : ""}</span>`;
-  select("#heatmap").innerHTML = html;
-  select("#heatmap-note").textContent = total
-    ? `${number(total)} observed releases. Every square is an hour in UTC.`
-    : "No confirmed releases yet. The clock fills in as companies ship.";
-}
 async function loadSummary() {
   const result = await api("/api/summary");
-  select("#stat-sites").textContent = number(result.enabled);
-  select("#stat-sites-note").textContent =
-    `${number(result.baselined)} baselines · ${number(result.targets)} monitored URLs`;
-  select("#stat-releases").textContent = number(result.releases);
-  select("#stat-weekend").textContent = number(result.weekend);
-  select("#stat-coverage").textContent = result.enabled
-    ? `${Math.round((result.fresh / result.enabled) * 100)}%`
-    : "—";
-  select("#stat-coverage-note").textContent =
-    `${number(result.fresh)} checked successfully in the last 15m`;
-  drawHeatmap(result.heatmap, result.releases);
+  select("#coverage-note").textContent =
+    `${number(result.enabled)} websites. ${number(result.fresh)} checked in the last 15 minutes. Updated every five minutes.`;
   if (result.activity.length)
     select("#feed").innerHTML = result.activity
       .map(
         (event) =>
-          `<div class="feed-item" data-company="${escape(event.company_id)}" role="button" tabindex="0"><span class="feed-logo">${escape(event.name.slice(0, 1))}</span><div><strong>${escape(event.name)}</strong><small>New frontend version${event.batch ? " · " + escape(event.batch) : ""}</small></div><time>${ago(event.detected_at)}</time></div>`,
+          `<a class="feed-item" href="/company/${encodeURIComponent(event.company_id)}"><div><strong>${escape(event.name)}</strong><small>New frontend version${event.batch ? " · " + escape(event.batch) : ""}</small></div><time>${ago(event.detected_at)}</time></a>`,
       )
       .join("");
   const batchSelect = select("#batch");
@@ -112,10 +81,10 @@ async function loadCompanies() {
               queued: "Queued",
               stale: "Delayed",
             }[status] || status;
-          return `<tr class="company-row" data-company="${escape(company.id)}" tabindex="0" role="button" aria-label="View ${escape(company.name)}"><td class="rank">${state.page * 50 + index + 1}</td><td><div class="company-name"><span class="company-avatar">${escape(company.name.slice(0, 1))}</span><div><strong>${escape(company.name)}</strong><small>${escape(host(company.url))}</small></div></div></td><td><span class="batch-tag${company.batch ? "" : " community-tag"}">${escape(company.batch || "COMMUNITY")}</span></td><td class="numeric release-count">${company.baseline_at ? number(company.releases) : "—"}</td><td class="numeric muted">${company.baseline_at ? number(company.weekend) : "—"}</td><td class="last-ship" title="${escape(date(company.last_release))}">${company.last_release ? ago(company.last_release) : company.baseline_at ? "No release yet" : "Awaiting baseline"}</td><td><span class="monitor-state ${escape(status)}" title="${escape(company.error || "Last successful check: " + date(company.last_success))}">${label}</span></td></tr>`;
+          return `<tr class="company-row"><td class="rank">${state.page * 50 + index + 1}</td><td><div class="company-name"><div><a href="/company/${encodeURIComponent(company.id)}">${escape(company.name)}</a><small>${escape(host(company.url))}</small></div></div></td><td><span class="batch-tag${company.batch ? "" : " community-tag"}">${escape(company.batch || "COMMUNITY")}</span></td><td class="numeric release-count">${company.baseline_at ? number(company.releases) : "—"}</td><td class="numeric muted">${company.baseline_at ? number(company.weekend) : "—"}</td><td class="last-ship" title="${escape(date(company.last_release))}">${company.last_release ? ago(company.last_release) : company.baseline_at ? "No release yet" : "Waiting for data"}</td><td><span class="monitor-state ${escape(status)}" title="${escape(company.error || "Last successful check: " + date(company.last_success))}">${label}</span></td></tr>`;
         })
         .join("")
-    : '<tr><td colspan="7" class="table-empty">No companies match this search. Try another name or batch.</td></tr>';
+    : '<tr><td colspan="7" class="table-empty">No websites match this search. Try another name or collection.</td></tr>';
   select("#results-label").textContent = result.total
     ? `${number(state.page * 50 + 1)}–${number(Math.min((state.page + 1) * 50, result.total))} of ${number(result.total)} sites · ${state.days}-day window`
     : "No results";
@@ -130,27 +99,56 @@ async function refresh() {
     select("#connection-error").hidden = false;
   }
 }
+function historyChart(history) {
+  const max = Math.max(1, ...history.days.map((day) => day.releases ?? 0));
+  const bars = history.days
+    .map((day, index) => {
+      const position = 45 + index * 27;
+      if (day.releases === null)
+        return `<text x="${position + 8}" y="205" class="chart-missing"><title>${escape(day.day)}: no successful observation</title>·</text>`;
+      const height = (day.releases / max) * 150;
+      return `<rect x="${position}" y="${190 - height}" width="15" height="${Math.max(2, height)}" class="chart-bar"><title>${escape(day.day)}: ${day.releases} observed releases${day.complete ? "" : " (partial day)"}</title></rect>`;
+    })
+    .join("");
+  return `<figure class="release-chart"><svg viewBox="0 0 900 240" role="img" aria-label="Daily observed frontend releases over the last 30 UTC days. Dots indicate no observations; today is partial."><text x="12" y="43">${max}</text><text x="12" y="194">0</text><line x1="40" y1="190" x2="860" y2="190" class="chart-axis"/>${bars}<text x="45" y="230">${escape(history.days[0].day.slice(5))}</text><text x="430" y="230">${escape(history.days[14].day.slice(5))}</text><text x="800" y="230">Today</text></svg><figcaption>Daily observed releases · UTC · dots mean no observations, not zero releases. Today is partial.</figcaption><details><summary>Daily data</summary><table><thead><tr><th>Date (UTC)</th><th>Observed releases</th></tr></thead><tbody>${history.days.map((day) => `<tr><td>${escape(day.day)}</td><td>${day.releases === null ? "Not observed" : number(day.releases)}${day.releases !== null && !day.complete ? " (partial day)" : ""}</td></tr>`).join("")}</tbody></table></details></figure>`;
+}
 async function showCompany(id) {
-  const dialog = select("#company-dialog");
-  select("#company-detail").textContent = "Loading observation history…";
-  if (!dialog.open) dialog.showModal();
+  select("#index-page").hidden = true;
+  select("#company-page").hidden = false;
   try {
     const result = await api("/api/company/" + encodeURIComponent(id));
     const company = result.company;
-    select("#company-detail").innerHTML =
-      `<h2>${escape(company.name)}</h2><a class="detail-link" href="${escape(company.url)}" target="_blank" rel="noopener">${escape(host(company.url))}</a><p>${escape(company.description)}</p><div class="detail-stats"><div><small>BASELINE ESTABLISHED</small><strong>${escape(date(company.baseline_at))}</strong></div><div><small>SUCCESSFUL CHECKS / ATTEMPTS</small><strong>${number(company.successes)} / ${number(company.checks)}</strong></div><div><small>LAST SUCCESSFUL CHECK</small><strong>${escape(date(company.last_success))}</strong></div><div><small>LAST CHECK ATTEMPT</small><strong>${escape(date(company.last_check))}</strong></div></div><div class="detail-status">${escape(company.error || "Monitoring public frontend changes every five minutes.")}</div><h3>Observed releases</h3>${result.releases.length ? result.releases.map((release) => `<article class="detail-event"><time>${escape(date(release.detected_at))}</time><p>Changed between ${escape(date(release.previous_at))} and ${escape(date(release.detected_at))}. Confirmed ${escape(date(release.confirmed_at))}.</p><details><summary>Inspect release evidence</summary><pre>${escape(JSON.stringify(JSON.parse(release.evidence), null, 2))}</pre></details></article>`).join("") : "<p>No confirmed releases yet. Monitoring starts from the baseline; historical deploys cannot be reconstructed from these checks.</p>"}<p class="fine-print">Showing up to 100 most recent releases. Times are UTC. Backend-only deploys, commits, and working hours are not observable.</p>`;
-    const monitoring = document.createElement("section");
+    const history = result.history;
     const discovery = result.discovery;
     const review = discovery?.review ? JSON.parse(discovery.review) : null;
-    const note =
-      discovery?.error ||
-      (review && !review.recommended.length
-        ? "Luna recommended no product URL. The existing website remains monitored."
-        : discovery?.status === "ready"
-          ? "Luna review complete. These are the selected monitoring URLs."
-          : "App URL discovery is queued or running; the current website remains monitored.");
-    monitoring.innerHTML = `<h3>Monitoring ${result.targets.length} ${result.targets.length === 1 ? "domain" : "domains"}</h3><p>${escape(note)}</p>${result.targets.map((target) => `<div class="monitor-target"><a href="${escape(target.url)}" target="_blank" rel="noopener">${escape(target.url)}</a><span>${escape(target.status)} · last success ${escape(ago(target.last_success))}</span></div>`).join("")}<p class="fine-print">${discovery ? `Discovery budget: ${number(discovery.candidate_limit)} domains · monitoring cap: ${number(discovery.domain_limit)}.` : ""} New URL selections start with a fresh baseline. Earlier releases retain their original URL in the evidence.</p>`;
-    select("#company-detail").querySelector(".detail-status").after(monitoring);
+    const monitoringNote = discovery?.error
+      ? "URL review could not finish. The existing website remains monitored."
+      : review && !review.recommended.length
+        ? "No product URL was recommended. The existing website remains monitored."
+        : ["queued", "running"].includes(discovery?.status)
+          ? "URL review is in progress. The current website remains monitored."
+          : "Watching these public URLs.";
+    document.title = company.name + " — Shipwatch";
+    const rate =
+      history.releasesPerDay === null
+        ? "Still getting to know this website."
+        : `${history.releasesPerDay.toLocaleString(undefined, { maximumFractionDigits: 1 })} releases per observed day.`;
+    select("#company-detail").innerHTML = `
+      <header class="company-heading"><p class="eyebrow">WEBSITE OBSERVATIONS</p><h1>${escape(company.name)}</h1><div class="company-links"><a href="${escape(company.url)}" target="_blank" rel="noopener">${escape(host(company.url))}</a><button class="text-button" id="copy-company">Copy page link</button><span id="share-status" role="status"></span></div><p>${escape(company.description)}</p></header>
+      <section class="company-history"><h2>Release history</h2><p class="metric-sentence">${escape(rate)}</p><p class="history-context">${number(history.total)} releases observed over the past 30 days.</p><details class="metric-method"><summary>How this rate works</summary><p>The rate uses ${number(history.comparableReleases)} releases across ${number(history.observedDays)} completed UTC days with successful checks. Today and a partial first day are excluded. Days without checks are missing, not zero. A checked day does not mean uninterrupted coverage.</p></details>${historyChart(history)}</section>
+      <section class="observation-notes"><h2>What we can see</h2><dl><dt>First observed</dt><dd>${escape(date(company.baseline_at))}</dd><dt>Last successful check</dt><dd>${escape(date(company.last_success))}</dd><dt>Successful checks</dt><dd>${number(company.successes)} of ${number(company.checks)} attempts</dd></dl><p>${escape(company.error || "Public frontend changes, checked every five minutes.")}</p><h3>Monitored URLs</h3><p class="fine-print">${escape(monitoringNote)}</p>${result.targets.map((target) => `<p class="monitor-target"><a href="${escape(target.url)}" target="_blank" rel="noopener">${escape(target.url)}</a><span>${escape(target.status)} · last success ${escape(ago(target.last_success))}</span></p>`).join("")}</section>
+      <section class="release-log"><h2>Observation log</h2>${result.releases.length ? result.releases.map((release) => `<article class="detail-event"><time>${escape(date(release.detected_at))}</time><p>Changed between ${escape(date(release.previous_at))} and ${escape(date(release.detected_at))}. Confirmed ${escape(date(release.confirmed_at))}.</p><details><summary>Release evidence</summary><pre>${escape(JSON.stringify(JSON.parse(release.evidence), null, 2))}</pre></details></article>`).join("") : "<p>No releases observed yet. Changes will appear here as we see them.</p>"}<p class="fine-print">Latest 100 events. The chart counts all releases in its date range, not just this log. These are frontend signals, not commits, backend deploys, or working hours.</p></section>`;
+    select("#copy-company").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(
+          location.origin + "/company/" + encodeURIComponent(id),
+        );
+        select("#share-status").textContent = "Link copied";
+      } catch {
+        select("#share-status").textContent =
+          "Copy this page’s address from your browser.";
+      }
+    });
   } catch (error) {
     select("#company-detail").textContent = error.message;
   }
@@ -174,15 +172,6 @@ for (const id of ["#method-button", "#method-inline", "#hero-method"])
 document.addEventListener("click", (event) => {
   const close = event.target.closest("[data-close]");
   if (close) document.getElementById(close.dataset.close).close();
-  const company = event.target.closest("[data-company]");
-  if (company) showCompany(company.dataset.company);
-});
-document.addEventListener("keydown", (event) => {
-  const company = event.target.closest("[data-company]");
-  if (company && ["Enter", " "].includes(event.key)) {
-    event.preventDefault();
-    showCompany(company.dataset.company);
-  }
 });
 let debounce;
 select("#search").addEventListener("input", (event) => {
@@ -287,13 +276,13 @@ select("#add-form").addEventListener("submit", async (event) => {
     }
     select("#submission-message").textContent = result.existing
       ? "Already in the index. Opening its profile…"
-      : "Added. The first check will establish its baseline.";
+      : "Added. We’ll start watching for changes.";
     await refresh();
     setTimeout(() => {
       select("#add-dialog").close();
       select("#discovery-back").click();
       event.target.reset();
-      showCompany(result.company.id);
+      location.href = "/company/" + encodeURIComponent(result.company.id);
     }, 900);
   } catch (error) {
     select("#submission-message").textContent = error.message;
@@ -305,7 +294,11 @@ select("#add-form").addEventListener("submit", async (event) => {
     }
   }
 });
-refresh();
-setInterval(() => {
-  if (!document.hidden) refresh();
-}, 30000);
+const companyPath = location.pathname.match(/^\/company\/([a-zA-Z0-9-]+)$/);
+if (companyPath) showCompany(companyPath[1]);
+else {
+  refresh();
+  setInterval(() => {
+    if (!document.hidden) refresh();
+  }, 30000);
+}

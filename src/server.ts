@@ -1,4 +1,10 @@
 import { db, now } from "./db";
+import { encodeHTML } from "entities";
+import {
+  releaseHistory,
+  type ObservationDay,
+  type ReleaseDay,
+} from "./history";
 import { startPolling } from "./poller";
 import { importYC } from "./import-yc";
 import { normalizeUrl } from "./network";
@@ -174,7 +180,9 @@ const server = Bun.serve({
         );
         const company = db
           .query(
-            `SELECT id,name,url,batch,description,yc_url,status,error,baseline_at,last_check,last_success,checks,successes FROM company_summary WHERE id=?`,
+            `SELECT id,name,url,batch,description,yc_url,status,error,
+            (SELECT MIN(t.baseline_at) FROM targets t WHERE t.company_id=c.id) AS baseline_at,
+            last_check,last_success,checks,successes FROM company_summary c WHERE id=?`,
           )
           .get(id);
         if (!company) return json({ error: "Company not found" }, 404);
@@ -198,7 +206,30 @@ const server = Bun.serve({
             "SELECT status,domain_limit,candidate_limit,error,review,updated_at FROM discovery_jobs WHERE company_id=?",
           )
           .get(id);
-        return json({ company, releases, coverage, targets, discovery });
+        const baseline = (company as { baseline_at: number | null })
+          .baseline_at;
+        const dailyReleases = db
+          .query(
+            "SELECT strftime('%Y-%m-%d',detected_at,'unixepoch') AS day,COUNT(*) AS releases FROM releases WHERE company_id=? AND detected_at>=? GROUP BY day",
+          )
+          .all(
+            id,
+            Math.floor(now() / 86400) * 86400 - 29 * 86400,
+          ) as ReleaseDay[];
+        const history = releaseHistory(
+          baseline,
+          coverage as ObservationDay[],
+          dailyReleases,
+          now(),
+        );
+        return json({
+          company,
+          releases,
+          coverage,
+          targets,
+          discovery,
+          history,
+        });
       }
       if (
         request.method === "POST" &&
@@ -332,18 +363,41 @@ const server = Bun.serve({
         "/styles.css": "styles.css",
         "/favicon.svg": "favicon.svg",
         "/source-serif-4.woff2": "source-serif-4.woff2",
+        "/chakra-petch-500.woff2": "chakra-petch-500.woff2",
       };
-      const asset = assets[url.pathname];
+      const companyPage = /^\/company\/[a-zA-Z0-9-]+$/.test(url.pathname);
+      const pageCompany = companyPage
+        ? (db
+            .query("SELECT name FROM companies WHERE id=?")
+            .get(url.pathname.slice(9)) as { name: string } | null)
+        : null;
+      if (companyPage && !pageCompany)
+        return json({ error: "Website not found" }, 404);
+      const asset = companyPage ? "index.html" : assets[url.pathname];
       if (!asset) return json({ error: "Not found" }, 404);
-      return new Response(Bun.file(new URL(asset, publicDirectory)), {
-        headers: {
-          "Cache-Control": "public, max-age=60",
-          "X-Content-Type-Options": "nosniff",
-          "Referrer-Policy": "strict-origin-when-cross-origin",
-          "Content-Security-Policy":
-            "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      return new Response(
+        companyPage
+          ? (await Bun.file(new URL(asset, publicDirectory)).text())
+              .replace("<body>", '<body data-view="company">')
+              .replace(
+                /<title>[^<]*<\/title>/,
+                () =>
+                  `<title>${encodeHTML(pageCompany!.name)} — Shipwatch</title><meta property="og:title" content="${encodeHTML(pageCompany!.name)} — Shipwatch" />`,
+              )
+          : Bun.file(new URL(asset, publicDirectory)),
+        {
+          headers: {
+            "Cache-Control": "public, max-age=60",
+            ...(companyPage
+              ? { "Content-Type": "text/html; charset=utf-8" }
+              : {}),
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Content-Security-Policy":
+              "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+          },
         },
-      });
+      );
     } catch (error) {
       if (error instanceof OpenAI.APIError)
         return json(
