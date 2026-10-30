@@ -1,10 +1,16 @@
 import { db, now, recordSnapshot, recordFailure, type Target } from "./db";
 import { snapshot } from "./detect";
 import type { Asset } from "./detect";
+import { BackoffError } from "./network";
+import { getDomain } from "tldts";
 import { saveBody, analyzeNext } from "./analysis";
 
 const inflight = new Set<string>();
 const hostInflight = new Set<string>();
+const siteOf = (url: string) => {
+  const hostname = new URL(url).hostname;
+  return getDomain(hostname, { allowPrivateDomains: true }) ?? hostname;
+};
 const concurrency = Number(process.env.POLL_CONCURRENCY || 24);
 
 export async function checkCompany(company: Target) {
@@ -17,18 +23,19 @@ export async function checkCompany(company: Target) {
       if (!db.query("SELECT 1 FROM bundle_bodies WHERE hash=?").get(asset.hash)) {
         delete asset.etag;
         delete asset.modified;
+        delete asset.immutable;
       }
     const result = await snapshot(
       company.url,
       previous,
       saveBody,
     );
-    bytes = result.bytes;
+    bytes += result.transferBytes;
     recordSnapshot(company, result, now());
     success = 1;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    recordFailure(company, message);
+    recordFailure(company, message, error instanceof BackoffError ? error.seconds : undefined);
   }
   db.query(
     `INSERT INTO daily_checks (company_id,day,checks,successes,bytes) VALUES (?,?,1,?,?)
@@ -57,7 +64,7 @@ export function startPolling() {
       .all(now());
     for (const company of due) {
       if (inflight.size >= concurrency) break;
-      const host = new URL(company.url).hostname;
+      const host = siteOf(company.url);
       if (inflight.has(company.id) || hostInflight.has(host)) continue;
       inflight.add(company.id);
       hostInflight.add(host);

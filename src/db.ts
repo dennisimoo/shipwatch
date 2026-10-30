@@ -286,11 +286,12 @@ export function recordSnapshot(
   }).immediate();
 }
 
-export function recordFailure(company: Target, message: string) {
+export function recordFailure(company: Target, message: string, retryAfter?: number) {
   const unsupported = /No observable|disallowed/.test(message);
+  const backoff = Math.min(3600, 300 * 2 ** Math.min(company.failures, 4));
   const delay = unsupported
     ? 86400
-    : Math.min(3600, 300 * 2 ** Math.min(company.failures, 4));
+    : retryAfter !== undefined ? Math.max(backoff, retryAfter) : backoff;
   db.query(
     `UPDATE targets SET last_check=?,checks=checks+1,failures=failures+1,
     status=?,error=?,candidate=NULL,candidate_at=NULL,previous_success=NULL,next_check=? WHERE id=?`,

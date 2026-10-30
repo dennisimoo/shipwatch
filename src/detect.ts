@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { apiSchema, fetchPublic, sameSite } from "./network";
+import { apiSchema, checkBackoff, fetchPublic, sameSite } from "./network";
 import { decodeHTMLAttribute } from "entities";
 
 export const hash = (value: string) =>
@@ -11,6 +11,22 @@ export interface Asset {
   references?: string[];
   etag?: string;
   modified?: string;
+  immutable?: boolean;
+  fetchedAt?: number;
+}
+
+const revalidateAfter = 86400;
+
+/** Hashed asset URLs that the server declares cacheable for a month or forever never change in place. */
+export function immutableAsset(address: string, cacheControl: string | string[] | undefined): boolean {
+  const header = String(cacheControl || "").toLowerCase();
+  if (/no-store|no-cache/.test(header)) return false;
+  const maxAge = Number(/(?:^|,)\s*(?:s-)?max-age=(\d+)/.exec(header)?.[1] ?? 0);
+  const plain = new URL(address);
+  plain.searchParams.delete("dpl");
+  plain.hash = "";
+  const hashed = assetIdentity(address) !== plain.href;
+  return hashed && (header.includes("immutable") || maxAge >= 2592000);
 }
 
 const scanner = new Bun.Transpiler({ loader: "js" });
@@ -74,6 +90,7 @@ export interface Snapshot {
   assets: Record<string, Asset>;
   evidence: string;
   bytes: number;
+  transferBytes: number;
   captureScope: string;
 }
 
@@ -114,6 +131,7 @@ export async function snapshot(
   saveBody?: (hash: string, body: string) => void,
 ): Promise<Snapshot> {
   const page = await fetchPublic(url, { Accept: "text/html, application/json;q=0.9" });
+  checkBackoff(page);
   if (page.status !== 200)
     throw new Error(`Website returned HTTP ${page.status}`);
   if (apiSchema(page.body)) {
@@ -121,7 +139,7 @@ export async function snapshot(
     const contentHash = hash(JSON.stringify(JSON.parse(page.body)));
     saveBody?.(digest, page.body);
     const evidence = JSON.stringify({ method: "content-v3", content: [{ url: page.url, hash: digest, contentHash }] });
-    return { fingerprint: "content-v3:" + contentHash, assets: {}, evidence, bytes: page.bytes, captureScope: "registrable-128-v2" };
+    return { fingerprint: "content-v3:" + contentHash, assets: {}, evidence, bytes: page.bytes, transferBytes: page.transferBytes ?? page.bytes, captureScope: "registrable-128-v2" };
   }
   if (!String(page.headers["content-type"] || "").includes("text/html"))
     throw new Error("Website did not return HTML or a public API schema");
@@ -129,7 +147,9 @@ export async function snapshot(
   if (!scripts.length)
     throw new Error("No observable first-party JavaScript on this page");
   const build = page.body.match(/"buildId"\s*:\s*"([^"<>]{1,200})"/)?.[1] || null;
-  return inspectBundles(page.url, scripts, previous, page.bytes, build, saveBody);
+  const result = await inspectBundles(page.url, scripts, previous, page.bytes, build, saveBody);
+  result.transferBytes += page.transferBytes ?? page.bytes;
+  return result;
 }
 
 export async function inspectBundles(
@@ -142,11 +162,22 @@ export async function inspectBundles(
 ): Promise<Snapshot> {
   const assets: Record<string, Asset> = {};
   let bytes = initialBytes;
+  let transferBytes = 0;
+  const fetchedAt = Math.floor(Date.now() / 1000);
   const queue = scripts.filter((script) => sameSite(url, script));
   const queued = new Set(queue);
   for (let index = 0; index < queue.length && Object.keys(assets).length < assetLimit; index++) {
     const script = queue[index];
     const old = previous[script];
+    if (old?.method === "content-v3" && old.immutable && old.fetchedAt && fetchedAt - old.fetchedAt < revalidateAfter) {
+      assets[script] = old;
+      for (const reference of old.references ?? [])
+        if (sameSite(url, reference) && !queued.has(reference)) {
+          queue.push(reference);
+          queued.add(reference);
+        }
+      continue;
+    }
     const headers: Record<string, string> = {};
     const currentCache = old?.method === "content-v3.1";
     if (currentCache && old.etag) headers["If-None-Match"] = old.etag;
@@ -154,8 +185,11 @@ export async function inspectBundles(
     if (bytes >= byteLimit) throw new Error("Bundle inspection exceeds size limit");
     const asset = await fetchPublic(script, headers, Math.min(5_000_000, byteLimit - bytes));
     bytes += asset.bytes;
+    transferBytes += asset.transferBytes ?? asset.bytes;
+    checkBackoff(asset);
     if (!sameSite(url, asset.url)) throw new Error("Bundle redirected outside the website's domain");
-    if (asset.status === 304 && currentCache) assets[script] = old;
+    if (asset.status === 304 && currentCache)
+      assets[script] = { ...old, immutable: immutableAsset(script, asset.headers["cache-control"]) || old.immutable, fetchedAt };
     else if (
       asset.status === 200 &&
       !String(asset.headers["content-type"]).includes("text/html")
@@ -167,6 +201,8 @@ export async function inspectBundles(
         references: bundleReferences(asset.body, asset.url),
         etag: asset.headers.etag,
         modified: asset.headers["last-modified"],
+        immutable: immutableAsset(script, asset.headers["cache-control"]),
+        fetchedAt,
       };
       saveBody?.(assets[script].hash, asset.body);
     } else throw new Error(`Bundle returned HTTP ${asset.status}`);
@@ -195,5 +231,5 @@ export async function inspectBundles(
     .map(([address, asset]) => [assetIdentity(address), asset.contentHash])
     .sort();
   const uninspected = queue.filter((script) => !assets[script]).map(assetIdentity).sort();
-  return { fingerprint: "content-v3:" + hash(JSON.stringify({ content, uninspected })), assets, evidence, bytes, captureScope: "registrable-128-v2" };
+  return { fingerprint: "content-v3:" + hash(JSON.stringify({ content, uninspected })), assets, evidence, bytes, transferBytes, captureScope: "registrable-128-v2" };
 }
