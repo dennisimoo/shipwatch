@@ -128,6 +128,9 @@ if (
 )
   db.exec("ALTER TABLE targets ADD COLUMN content_baseline_at INTEGER");
 
+if (!(db.query("PRAGMA table_info(change_analysis)").all() as { name: string }[]).some((column) => column.name === "kind"))
+  db.exec("ALTER TABLE change_analysis ADD COLUMN kind TEXT");
+
 export function ensureCompanySlug(id: string, name: string) {
   const existing = db
     .query("SELECT slug FROM companies WHERE id=?")

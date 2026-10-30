@@ -216,7 +216,7 @@ const server = Bun.serve({
         const id = (company as { id: string }).id;
         const releases = db
           .query(
-            `SELECT r.id,r.detected_at,r.previous_at,r.confirmed_at,r.evidence,r.url,a.classification,a.summary
+            `SELECT r.id,r.detected_at,r.previous_at,r.confirmed_at,r.evidence,r.url,a.classification,a.summary,a.kind
               FROM application_releases r JOIN change_analysis a ON a.release_id=r.id
               WHERE r.company_id=? ORDER BY r.detected_at DESC LIMIT 100`,
           )
