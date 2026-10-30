@@ -9,6 +9,7 @@ import { startPolling } from "./poller";
 import { importYC } from "./import-yc";
 import { normalizeUrl } from "./network";
 import { hash } from "./detect";
+import { backendMap } from "./backend-map";
 import { RateLimiterMemory, RateLimiterRes } from "rate-limiter-flexible";
 import OpenAI from "openai";
 import {
@@ -189,6 +190,13 @@ const server = Bun.serve({
         });
       if (request.method === "GET" && url.pathname === "/api/companies")
         return json(cached(url.href, () => leaderboard(url)));
+      const backendRoute = /^\/api\/company\/([a-zA-Z0-9-]+)\/backend$/.exec(url.pathname);
+      if (request.method === "GET" && backendRoute) {
+        const company = db.query("SELECT id FROM companies WHERE slug=?").get(backendRoute[1]) as { id: string } | null;
+        if (!company) return json({ error: "Website not found" }, 404);
+        const map = await backendMap(company.id);
+        return map ? json(map) : json({ error: "No captured code yet." }, 404);
+      }
       if (
         request.method === "GET" &&
         url.pathname.startsWith("/api/company/")
@@ -199,7 +207,7 @@ const server = Bun.serve({
         const company = db
           .query(
             `SELECT id,slug,name,url,batch,description,yc_url,status,error,
-            (SELECT COUNT(*) FROM releases r WHERE r.company_id=c.id AND r.fingerprint NOT LIKE 'content-v2:%') AS legacy_releases,
+            (SELECT COUNT(*) FROM releases r WHERE r.company_id=c.id AND r.fingerprint NOT LIKE 'content-v3:%') AS legacy_releases,
             (SELECT MIN(t.content_baseline_at) FROM targets t WHERE t.company_id=c.id) AS baseline_at,
             last_check,last_success,checks,successes FROM company_summary c WHERE slug=?`,
           )
@@ -392,6 +400,7 @@ const server = Bun.serve({
         "/app.js": "app.js",
         "/chart.js": "chart.js",
         "/chart-data.js": "chart-data.js",
+        "/backend.js": "backend.js",
         "/uplot.js": "../node_modules/uplot/dist/uPlot.esm.js",
         "/uplot.css": "../node_modules/uplot/dist/uPlot.min.css",
         "/styles.css": "styles.css",

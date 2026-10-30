@@ -658,6 +658,7 @@ footer .wordmark {
 }
 .company-history,
 .observation-notes,
+.backend-map,
 .release-log {
   margin: 20px 0;
   border: 1px solid var(--line);
@@ -768,6 +769,7 @@ footer .wordmark {
 }
 .company-history h2,
 .observation-notes h2,
+.backend-map h2,
 .release-log h2 {
   font-size: 24px;
   margin-bottom: 12px;
@@ -1038,4 +1040,59 @@ dialog .candidate-choice input {
   main {
     max-width: 1320px;
   }
+}
+.backend-diagram {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 10px 0 20px;
+  font-family: var(--sans);
+}
+.map-link {
+  fill: none;
+  stroke: #c9c9c6;
+  stroke-width: 1;
+}
+.map-site {
+  fill: white;
+  stroke: var(--ink);
+}
+.map-site-name {
+  font-family: var(--serif);
+  font-size: 18px;
+  fill: var(--ink);
+}
+.map-site-note,
+.map-note,
+.map-more {
+  font-size: 12px;
+  fill: var(--muted);
+}
+.map-heading {
+  font-family: var(--display);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  fill: var(--muted);
+}
+.map-item {
+  font-size: 13px;
+  fill: var(--ink);
+}
+.map-api {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  fill: var(--accent);
+}
+.backend-list {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.backend-list ul {
+  columns: 2 260px;
+  padding-left: 18px;
+}
+.backend-list code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }

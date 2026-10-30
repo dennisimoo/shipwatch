@@ -140,6 +140,7 @@ async function showCompany(id) {
       <section class="observation-notes"><h2>Tracking details</h2><dl><dt>Watching since</dt><dd>${escape(date(company.baseline_at))}</dd><dt>Last checked</dt><dd>${escape(date(company.last_success))}</dd><dt>Successful checks</dt><dd>${number(company.successes)} / ${number(company.checks)}</dd></dl>${company.error ? `<p>${escape(company.error)}</p>` : ""}${result.targets.map((target) => `<p class="monitor-target"><a href="${escape(target.url)}" target="_blank" rel="noopener">${escape(host(target.url))}${escape(new URL(target.url).pathname === "/" ? "" : new URL(target.url).pathname)}</a><span>${result.preview ? "Snapshot" : escape(target.status)} · checked ${escape(date(target.last_success))}</span></p>`).join("")}</section>
       <section class="release-log"><h2>Releases</h2>${result.releases.length ? result.releases.map((release) => `<article class="detail-event"><details><summary><span>${escape(release.summary)}</span>${releaseTimestamp(release.detected_at)}</summary><dl class="event-details"><dt>Previous check</dt><dd>${escape(date(release.previous_at))}</dd><dt>Detected</dt><dd>${escape(date(release.detected_at))}</dd><dt>Confirmed</dt><dd>${escape(date(release.confirmed_at))}</dd></dl><details><summary>Fingerprint evidence</summary><pre>${escape(JSON.stringify(JSON.parse(release.evidence), null, 2))}</pre></details></details></article>`).join("") : "<p>No releases observed yet.</p>"}${result.releases.length >= 100 ? '<p class="fine-print">Latest 100 releases. The chart includes all releases in the selected range.</p>' : ""}</section>`;
     mountChart(result);
+    loadBackend(company.slug);
     select("#copy-company").addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(
@@ -154,6 +155,15 @@ async function showCompany(id) {
   } catch (error) {
     select("#company-detail").textContent = error.message;
   }
+}
+async function loadBackend(slug) {
+  try {
+    const [map, { backendSection }] = await Promise.all([
+      api("/api/company/" + encodeURIComponent(slug) + "/backend"),
+      import("/backend.js?v=1"),
+    ]);
+    select(".observation-notes")?.insertAdjacentHTML("afterend", backendSection(map));
+  } catch {}
 }
 select("#add-button").addEventListener("click", async () => {
   select("#add-dialog").showModal();

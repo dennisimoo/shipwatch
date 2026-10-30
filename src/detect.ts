@@ -94,6 +94,24 @@ export interface Snapshot {
   captureScope: string;
 }
 
+const hostingHeaders: [string, (headers: Record<string, unknown>) => boolean][] = [
+  ["Vercel", (headers) => "x-vercel-id" in headers || /vercel/i.test(String(headers.server))],
+  ["Netlify", (headers) => "x-nf-request-id" in headers || /netlify/i.test(String(headers.server))],
+  ["Cloudflare", (headers) => "cf-ray" in headers],
+  ["AWS CloudFront", (headers) => "x-amz-cf-id" in headers],
+  ["Fly.io", (headers) => "fly-request-id" in headers],
+  ["Render", (headers) => "rndr-id" in headers || "x-render-origin-server" in headers],
+  ["Railway", (headers) => "x-railway-request-id" in headers || /railway/i.test(String(headers.server))],
+  ["GitHub Pages", (headers) => "x-github-request-id" in headers],
+  ["Google Cloud", (headers) => /^(?:Google Frontend|gws)$/i.test(String(headers.server))],
+  ["Firebase Hosting", (headers) => /firebase/i.test(String(headers["x-powered-by"] ?? ""))],
+];
+
+/** Names the hosting/CDN layer from response headers (provider names only, no request IDs). */
+export function hostingFromHeaders(headers: Record<string, unknown>): string[] {
+  return hostingHeaders.filter(([, test]) => test(headers)).map(([name]) => name);
+}
+
 export async function extractScripts(
   html: string,
   base: string,
@@ -149,6 +167,8 @@ export async function snapshot(
   const build = page.body.match(/"buildId"\s*:\s*"([^"<>]{1,200})"/)?.[1] || null;
   const result = await inspectBundles(page.url, scripts, previous, page.bytes, build, saveBody);
   result.transferBytes += page.transferBytes ?? page.bytes;
+  const hosting = hostingFromHeaders(page.headers);
+  if (hosting.length) result.evidence = JSON.stringify({ ...JSON.parse(result.evidence), hosting });
   return result;
 }
 

@@ -2,8 +2,9 @@ import { gunzipSync } from "node:zlib";
 import { db } from "./db";
 import { apiSchema, sameSite } from "./network";
 
-interface Reference {
+export interface Reference {
   url: string;
+  type?: string;
   method: string;
   queryParams: string[];
   bodyParams: string[];
@@ -12,7 +13,7 @@ interface Evidence {
   content: { url: string; hash: string }[];
 }
 
-async function extract(digest: string): Promise<Reference[]> {
+export async function extract(digest: string): Promise<Reference[]> {
   const cached = db.query("SELECT entries FROM api_references WHERE hash=?").get(digest) as { entries: string } | null;
   if (cached) return JSON.parse(cached.entries);
   const row = db.query("SELECT body FROM bundle_bodies WHERE hash=?").get(digest) as { body: Uint8Array } | null;
@@ -37,7 +38,7 @@ async function extract(digest: string): Promise<Reference[]> {
       typeof entry.url === "string" && typeof entry.method === "string" &&
       (entry.method || entry.type === "fetch" || /^axios\./.test(String(entry.type))) &&
       Array.isArray(entry.queryParams) && Array.isArray(entry.bodyParams),
-    ).map((entry) => ({ url: entry.url, method: entry.method.toUpperCase() ||
+    ).map((entry) => ({ url: entry.url, type: typeof entry.type === "string" ? entry.type : undefined, method: entry.method.toUpperCase() ||
       /^axios\.(get|post|put|patch|delete|head|options)$/.exec(String(entry.type))?.[1].toUpperCase() || "",
       queryParams: entry.queryParams.filter((value: unknown) => typeof value === "string"),
       bodyParams: entry.bodyParams.filter((value: unknown) => typeof value === "string"),
