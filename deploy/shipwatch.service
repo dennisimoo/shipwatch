@@ -9,6 +9,7 @@ User=shipwatch
 Group=shipwatch
 WorkingDirectory=/opt/shipwatch
 EnvironmentFile=/etc/shipwatch.env
+EnvironmentFile=-/etc/shipwatch-openai.env
 ExecStart=/usr/local/bin/bun src/server.ts
 Restart=always
 RestartSec=5

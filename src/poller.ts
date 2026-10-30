@@ -1,4 +1,4 @@
-import { db, now, recordSnapshot, recordFailure, type Company } from "./db";
+import { db, now, recordSnapshot, recordFailure, type Target } from "./db";
 import { snapshot } from "./detect";
 import { fetchPublic, robotsAllowed } from "./network";
 
@@ -6,7 +6,7 @@ const inflight = new Set<string>();
 const hostInflight = new Set<string>();
 const concurrency = Number(process.env.POLL_CONCURRENCY || 24);
 
-export async function checkCompany(company: Company) {
+export async function checkCompany(company: Target) {
   const started = now();
   let bytes = 0;
   let success = 0;
@@ -38,7 +38,7 @@ export async function checkCompany(company: Company) {
               : ""
             : response.body;
         if (original)
-          db.query("UPDATE companies SET robots=?,robots_at=? WHERE id=?").run(
+          db.query("UPDATE targets SET robots=?,robots_at=? WHERE id=?").run(
             robots,
             started,
             company.id,
@@ -67,7 +67,7 @@ export async function checkCompany(company: Company) {
     `INSERT INTO daily_checks (company_id,day,checks,successes,bytes) VALUES (?,?,1,?,?)
     ON CONFLICT(company_id,day) DO UPDATE SET checks=checks+1,successes=successes+excluded.successes,bytes=bytes+excluded.bytes`,
   ).run(
-    company.id,
+    company.company_id,
     new Date(started * 1000).toISOString().slice(0, 10),
     success,
     bytes,
@@ -78,8 +78,8 @@ export function startPolling() {
   const tick = () => {
     if (inflight.size >= concurrency) return;
     const due = db
-      .query<Company, [number]>(
-        "SELECT * FROM companies WHERE enabled=1 AND next_check<=? ORDER BY next_check LIMIT 150",
+      .query<Target, [number]>(
+        "SELECT t.* FROM targets t JOIN companies c ON c.id=t.company_id WHERE t.enabled=1 AND c.enabled=1 AND t.next_check<=? ORDER BY t.next_check LIMIT 150",
       )
       .all(now());
     for (const company of due) {

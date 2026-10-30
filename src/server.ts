@@ -1,9 +1,20 @@
 import { db, now } from "./db";
 import { startPolling } from "./poller";
 import { importYC } from "./import-yc";
-import { fetchPublic, normalizeUrl } from "./network";
+import { normalizeUrl } from "./network";
 import { hash } from "./detect";
 import { RateLimiterMemory, RateLimiterRes } from "rate-limiter-flexible";
+import OpenAI from "openai";
+import {
+  applyTargets,
+  discover,
+  draftReview,
+  optionsFrom,
+  publicReview,
+  selectedUrls,
+  startDiscovery,
+  type Review,
+} from "./discovery";
 
 const publicDirectory = new URL("../public/", import.meta.url);
 const cache = new Map<string, { at: number; value: unknown }>();
@@ -38,12 +49,12 @@ function leaderboard(url: URL) {
     COUNT(r.id) AS releases,MAX(r.detected_at) AS last_release,
     SUM(CASE WHEN strftime('%w',r.detected_at,'unixepoch') IN ('0','6') THEN 1 ELSE 0 END) AS weekend,
     COUNT(DISTINCT strftime('%Y-%m-%d',r.detected_at,'unixepoch')) AS active_days
-    FROM companies c LEFT JOIN releases r ON r.company_id=c.id AND r.detected_at>=?
+    FROM company_summary c LEFT JOIN releases r ON r.company_id=c.id AND r.detected_at>=?
     ${condition} GROUP BY c.id ORDER BY ${order},c.name COLLATE NOCASE LIMIT 50 OFFSET ?`,
     )
     .all(since, ...parameters, page * 50);
   const total = db
-    .query(`SELECT COUNT(*) AS total FROM companies c ${condition}`)
+    .query(`SELECT COUNT(*) AS total FROM company_summary c ${condition}`)
     .get(...parameters);
   return { companies, ...(total as object), page, days, timezone: "UTC" };
 }
@@ -56,7 +67,7 @@ function summary() {
     SUM(CASE WHEN enabled=1 AND last_success>=? THEN 1 ELSE 0 END) AS fresh,
     SUM(CASE WHEN enabled=1 AND status='error' THEN 1 ELSE 0 END) AS errors,
     SUM(CASE WHEN enabled=1 AND status='unsupported' THEN 1 ELSE 0 END) AS unsupported,
-    MIN(baseline_at) AS started_at FROM companies`,
+    MIN(baseline_at) AS started_at FROM company_summary`,
     )
     .get(now() - 900) as Record<string, number>;
   const releases = db
@@ -89,10 +100,16 @@ function summary() {
       "SELECT COALESCE(SUM(bytes),0) AS bytes FROM daily_checks WHERE day>=date('now','-30 days')",
     )
     .get();
+  const targets = db
+    .query(
+      "SELECT COUNT(*) AS targets FROM targets t JOIN companies c ON c.id=t.company_id WHERE t.enabled=1 AND c.enabled=1",
+    )
+    .get() as { targets: number };
   return {
     ...counts,
     ...(releases as object),
     ...(bytes as object),
+    ...targets,
     heatmap,
     activity,
     batches,
@@ -113,7 +130,8 @@ function cached(key: string, build: () => unknown) {
 const server = Bun.serve({
   hostname: process.env.HOST || "127.0.0.1",
   port: Number(process.env.PORT || 3000),
-  maxRequestBodySize: 4096,
+  maxRequestBodySize: 32768,
+  idleTimeout: 180,
   async fetch(request, server) {
     const url = new URL(request.url);
     const json = (value: unknown, status = 200) =>
@@ -141,6 +159,10 @@ const server = Bun.serve({
       }
       if (request.method === "GET" && url.pathname === "/api/summary")
         return json(cached("summary", summary));
+      if (request.method === "GET" && url.pathname === "/api/discovery-options")
+        return json({
+          available: Boolean(process.env.OPENAI_API_KEY),
+        });
       if (request.method === "GET" && url.pathname === "/api/companies")
         return json(cached(url.href, () => leaderboard(url)));
       if (
@@ -152,13 +174,13 @@ const server = Bun.serve({
         );
         const company = db
           .query(
-            `SELECT id,name,url,batch,description,yc_url,status,error,baseline_at,last_check,last_success,checks,successes FROM companies WHERE id=?`,
+            `SELECT id,name,url,batch,description,yc_url,status,error,baseline_at,last_check,last_success,checks,successes FROM company_summary WHERE id=?`,
           )
           .get(id);
         if (!company) return json({ error: "Company not found" }, 404);
         const releases = db
           .query(
-            "SELECT id,detected_at,previous_at,confirmed_at,evidence FROM releases WHERE company_id=? ORDER BY detected_at DESC LIMIT 100",
+            "SELECT id,detected_at,previous_at,confirmed_at,evidence,url FROM releases WHERE company_id=? ORDER BY detected_at DESC LIMIT 100",
           )
           .all(id);
         const coverage = db
@@ -166,9 +188,22 @@ const server = Bun.serve({
             "SELECT day,checks,successes FROM daily_checks WHERE company_id=? AND day>=date('now','-30 days') ORDER BY day",
           )
           .all(id);
-        return json({ company, releases, coverage });
+        const targets = db
+          .query(
+            "SELECT id,url,status,error,baseline_at,last_success,checks,successes FROM targets WHERE company_id=? AND enabled=1 ORDER BY url",
+          )
+          .all(id);
+        const discovery = db
+          .query(
+            "SELECT status,domain_limit,candidate_limit,error,review,updated_at FROM discovery_jobs WHERE company_id=?",
+          )
+          .get(id);
+        return json({ company, releases, coverage, targets, discovery });
       }
-      if (request.method === "POST" && url.pathname === "/api/companies") {
+      if (
+        request.method === "POST" &&
+        ["/api/companies", "/api/discover"].includes(url.pathname)
+      ) {
         const proxyScheme = request.headers.get("x-forwarded-proto");
         const expectedOrigin =
           process.env.TRUST_PROXY === "1" &&
@@ -192,38 +227,99 @@ const server = Bun.serve({
             { error: "Today's community submission limit has been reached." },
             429,
           );
+        if (url.pathname === "/api/companies") {
+          const input = (await request.json()) as {
+            token?: unknown;
+            selected?: unknown;
+          };
+          if (typeof input.token !== "string")
+            return json(
+              { error: "Discover URLs before starting monitoring." },
+              400,
+            );
+          const draft = db
+            .query(
+              "SELECT payload FROM discovery_drafts WHERE token=? AND expires_at>?",
+            )
+            .get(input.token, now()) as { payload: string } | null;
+          if (!draft)
+            return json(
+              { error: "This review expired. Discover the website again." },
+              400,
+            );
+          const review = JSON.parse(draft.payload) as Review;
+          const urls = selectedUrls(review, input.selected);
+          const existing = db
+            .query("SELECT id FROM companies WHERE url=?")
+            .get(review.url);
+          if (existing) return json({ company: existing, existing: true });
+          const id = `site-${hash(review.url).slice(0, 16)}`;
+          db.transaction(() => {
+            const count = db
+              .query(
+                "SELECT COUNT(*) AS count FROM companies WHERE source='community' AND created_at>=?",
+              )
+              .get(now() - 86400) as { count: number };
+            if (count.count >= 100)
+              throw new Error("Today's submission limit has been reached.");
+            db.query(
+              "INSERT INTO companies(id,name,url,created_at) VALUES (?,?,?,?)",
+            ).run(id, review.name, review.url, now());
+            applyTargets(id, urls);
+            db.query(
+              "INSERT INTO discovery_jobs(company_id,status,domain_limit,candidate_limit,review,updated_at) VALUES (?,'ready',?,?,?,?)",
+            ).run(
+              id,
+              review.options.domainLimit,
+              review.options.candidateLimit,
+              JSON.stringify(publicReview(review)),
+              now(),
+            );
+            db.query("DELETE FROM discovery_drafts WHERE token=?").run(
+              input.token as string,
+            );
+          })();
+          cache.clear();
+          return json(
+            { company: { id, name: review.name }, existing: false },
+            201,
+          );
+        }
         await submissions.consume(client);
         submitting++;
         try {
           const input = (await request.json()) as {
             url?: string;
             name?: string;
+            domainLimit?: unknown;
+            candidateLimit?: unknown;
           };
           if (typeof input.url !== "string" || input.url.length > 1500)
             return json({ error: "Enter a website URL." }, 400);
+          if (
+            input.domainLimit !== undefined ||
+            input.candidateLimit !== undefined
+          )
+            return json(
+              { error: "Discovery limits are managed by the server." },
+              400,
+            );
           const target = normalizeUrl(input.url);
           const existing = db
             .query("SELECT id FROM companies WHERE url=?")
             .get(target.href);
           if (existing) return json({ company: existing, existing: true });
-          const response = await fetchPublic(target.href, {
-            Accept: "text/html",
-          });
-          if (response.status !== 200)
-            return json(
-              { error: `Website returned HTTP ${response.status}.` },
-              400,
-            );
-          const id = `site-${hash(target.href).slice(0, 16)}`;
           const name =
             typeof input.name === "string" && input.name.trim()
               ? input.name.trim().slice(0, 100)
               : target.hostname.replace(/^www\./, "");
-          db.query(
-            "INSERT OR IGNORE INTO companies (id,name,url,created_at,next_check) VALUES (?,?,?,?,?)",
-          ).run(id, name, target.href, now(), now());
-          cache.clear();
-          return json({ company: { id, name }, existing: false }, 201);
+          const review = await discover(name, target.href, optionsFrom({}));
+          const response = json({
+            token: draftReview(review),
+            review: publicReview(review),
+          });
+          response.headers.set("Cache-Control", "no-store");
+          return response;
         } finally {
           submitting--;
         }
@@ -235,6 +331,7 @@ const server = Bun.serve({
         "/app.js": "app.js",
         "/styles.css": "styles.css",
         "/favicon.svg": "favicon.svg",
+        "/source-serif-4.woff2": "source-serif-4.woff2",
       };
       const asset = assets[url.pathname];
       if (!asset) return json({ error: "Not found" }, 404);
@@ -248,6 +345,13 @@ const server = Bun.serve({
         },
       });
     } catch (error) {
+      if (error instanceof OpenAI.APIError)
+        return json(
+          {
+            error: `Luna discovery failed (HTTP ${error.status || "unknown"}). Please try again later.`,
+          },
+          502,
+        );
       if (error instanceof RateLimiterRes) {
         const response = json(
           { error: "Too many requests. Please try again shortly." },
@@ -282,4 +386,5 @@ if (process.env.POLL_ENABLED !== "0") {
   )
     await importYC();
   startPolling();
+  startDiscovery();
 }

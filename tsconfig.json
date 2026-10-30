@@ -3,6 +3,7 @@
     "target": "ESNext",
     "module": "Preserve",
     "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
     "lib": ["ESNext", "DOM"],
     "types": ["bun"],
     "strict": true,

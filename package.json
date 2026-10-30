@@ -15,9 +15,13 @@
     "typescript": "latest"
   },
   "dependencies": {
+    "cheerio": "^1.2.0",
     "entities": "^9.0.0",
     "ipaddr.js": "^2.5.0",
+    "openai": "^7.45.1",
+    "p-limit": "^7.3.3",
     "rate-limiter-flexible": "^11.2.3",
-    "robots-parser": "^3.0.1"
+    "robots-parser": "^3.0.1",
+    "tldts": "^7.4.19"
   }
 }

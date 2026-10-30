@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f6f5f0" />
+    <meta name="theme-color" content="#ffffff" />
     <meta
       name="description"
-      content="A public pulse on who's shipping. Track observed frontend releases across Y Combinator companies, every five minutes."
+      content="A public pulse on who's shipping. Track observed frontend releases across public websites, every five minutes."
     />
     <title>Shipwatch — Who's shipping?</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -16,64 +16,45 @@
   <body>
     <header class="topbar">
       <a class="wordmark" href="/" aria-label="Shipwatch home"
-        ><span class="brand-icon">↗</span>shipwatch<span class="beta"
-          >BETA</span
-        ></a
+        >Shipwatch<span class="beta">BETA</span></a
       >
       <nav aria-label="Main navigation">
         <a href="#leaderboard">Leaderboard</a
-        ><button class="text-button" id="method-button">How it works ↗</button
+        ><button class="text-button" id="method-button">How it works</button
         ><a
           href="https://github.com/dennisimoo/shipwatch"
           target="_blank"
           rel="noopener"
-          >GitHub ↗</a
+          >GitHub</a
         >
       </nav>
       <button class="button button-dark" id="add-button">
-        + Track a website
+        Track a website
       </button>
     </header>
     <main>
       <section class="hero">
         <div class="hero-copy">
           <div class="eyebrow">
-            <span class="live-dot"></span> THE PUBLIC SHIPPING INDEX
+            <span class="live-dot"></span> A PUBLIC OBSERVATORY FOR THE WEB
           </div>
-          <h1>Who shipped<br />while you slept<span class="orange">?</span></h1>
+          <h1>Who shipped<br />while you slept?</h1>
           <p>
-            A little less talking. A little more shipping.<br />Watch frontend
-            releases across YC companies, every five minutes.
+            A small window into what’s changing on the web.<br />
+            Frontend releases across public websites, checked every five
+            minutes.
           </p>
           <div class="hero-foot">
-            <span class="pill">Y COMBINATOR</span
-            ><span>Public websites. Observable changes. Open data.</span>
-          </div>
-        </div>
-        <div class="radar-card">
-          <div class="card-heading">
-            <span><span class="live-dot"></span> LATEST SIGNALS</span
-            ><span class="mono muted">LIVE FEED</span>
-          </div>
-          <div id="feed" class="feed">
-            <div class="empty-feed">
-              <span class="signal-icon">⌁</span
-              ><strong>Listening for the next ship.</strong>
-              <p>
-                New releases appear here after confirmation.<br />No backfilled
-                or estimated activity.
-              </p>
-            </div>
-          </div>
-          <div class="radar-footer">
-            <span class="mono">CHECK → COMPARE → CONFIRM</span
-            ><span class="orange">↗</span>
+            <a class="button button-dark" href="#leaderboard"
+              >Explore the index</a
+            >
+            <button class="text-button" id="hero-method">How we observe</button>
           </div>
         </div>
       </section>
       <section class="stats" aria-label="Monitoring statistics">
         <div class="stat">
-          <span class="stat-label">SITES MONITORED</span
+          <span class="stat-label">SITES IN THE INDEX</span
           ><strong id="stat-sites">—</strong
           ><span id="stat-sites-note">Loading the directory</span>
         </div>
@@ -93,38 +74,11 @@
           ><span id="stat-coverage-note">Successful check in the last 15m</span>
         </div>
       </section>
-      <section class="activity-section">
-        <div class="section-intro">
-          <div>
-            <div class="eyebrow">THE SHIPPING CLOCK</div>
-            <h2>When does the internet ship?</h2>
-          </div>
-          <span class="mono muted">LAST 30 DAYS / UTC</span>
-        </div>
-        <div class="heatmap-card">
-          <div class="heatmap-head">
-            <span>MON</span><span>DAY → HOUR</span>
-          </div>
-          <div
-            id="heatmap"
-            class="heatmap"
-            aria-label="Release activity by weekday and hour in UTC"
-          ></div>
-          <div class="heatmap-foot">
-            <p id="heatmap-note">
-              Every square is an hour. Activity builds as monitoring runs.
-            </p>
-            <div class="legend">
-              <span>LESS</span><i></i><i></i><i></i><i></i><span>MORE</span>
-            </div>
-          </div>
-        </div>
-      </section>
       <section class="leaderboard-section" id="leaderboard">
         <div class="section-intro">
           <div>
-            <div class="eyebrow">THE LEADERBOARD</div>
-            <h2>Show your ships.</h2>
+            <div class="eyebrow">01 / THE INDEX</div>
+            <h2>Who’s shipping.</h2>
           </div>
           <div class="window-switch" aria-label="Ranking period">
             <button data-days="7">7 days</button
@@ -134,15 +88,14 @@
         <div class="table-card">
           <div class="filters">
             <label class="search-box"
-              ><span aria-hidden="true">⌕</span
               ><input
                 id="search"
                 type="search"
-                placeholder="Find a company or website…"
-                aria-label="Search companies" /></label
+                placeholder="Find a website or company…"
+                aria-label="Search websites" /></label
             ><label class="select-wrap"
-              ><select id="batch" aria-label="Filter by YC batch">
-                <option value="">All batches + community</option>
+              ><select id="batch" aria-label="Filter by starter cohort">
+                <option value="">All websites</option>
               </select></label
             ><label class="select-wrap"
               ><select id="sort" aria-label="Sort leaderboard">
@@ -157,20 +110,17 @@
               <thead>
                 <tr>
                   <th class="rank-column">#</th>
-                  <th>COMPANY</th>
-                  <th>BATCH</th>
-                  <th class="numeric">
-                    RELEASES <span class="orange">↓</span>
-                  </th>
+                  <th>WEBSITE</th>
+                  <th>COHORT</th>
+                  <th class="numeric">RELEASES</th>
                   <th class="numeric">WEEKEND</th>
                   <th>LAST SHIP</th>
                   <th>MONITOR</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody id="companies">
                 <tr>
-                  <td colspan="8" class="table-empty">Loading companies…</td>
+                  <td colspan="7" class="table-empty">Loading websites…</td>
                 </tr>
               </tbody>
             </table>
@@ -183,30 +133,80 @@
                 id="previous"
                 aria-label="Previous page"
               >
-                ←</button
+                Previous</button
               ><button class="page-button" id="next" aria-label="Next page">
-                →
+                Next
               </button>
             </div>
           </div>
         </div>
         <p class="fine-print">
-          A release is a confirmed, previously unseen frontend fingerprint. It
-          isn't a commit count or a measure of team productivity.
+          Anyone can add a public website. YC companies are simply our starting
+          set. A release is a confirmed, previously unseen frontend fingerprint.
+          It isn't a commit count or a measure of team productivity.
           <button class="text-button" id="method-inline">
-            Read the methodology ↗
+            Read the methodology
           </button>
         </p>
       </section>
+      <div class="observatory">
+        <section class="activity-section">
+          <div class="section-intro">
+            <div>
+              <div class="eyebrow">02 / THE SHIPPING CLOCK</div>
+              <h2>A rhythm of releases.</h2>
+            </div>
+            <span class="mono muted">LAST 30 DAYS / UTC</span>
+          </div>
+          <div class="heatmap-card">
+            <div class="heatmap-head">
+              <span>MON</span><span>DAY / HOUR</span>
+            </div>
+            <div
+              id="heatmap"
+              class="heatmap"
+              aria-label="Release activity by weekday and hour in UTC"
+            ></div>
+            <div class="heatmap-foot">
+              <p id="heatmap-note">
+                Every square is an hour. Activity builds as monitoring runs.
+              </p>
+              <div class="legend">
+                <span>LESS</span><i></i><i></i><i></i><i></i><span>MORE</span>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="signals-section" aria-label="Latest release signals">
+          <div class="radar-card">
+            <div class="card-heading">
+              <span><span class="live-dot"></span> 03 / FIELD NOTES</span
+              ><span class="mono muted">LATEST RELEASES</span>
+            </div>
+            <div id="feed" class="feed">
+              <div class="empty-feed">
+                <strong>Listening for the next ship.</strong>
+                <p>
+                  New releases appear here after confirmation.<br />No
+                  backfilled or estimated activity.
+                </p>
+              </div>
+            </div>
+            <div class="radar-footer">
+              <span class="mono">CHECK · COMPARE · CONFIRM</span>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
     <footer>
-      <a class="wordmark" href="/">↗ shipwatch</a
-      ><span>Built for the quietly relentless.</span
+      <a class="wordmark" href="/">shipwatch</a
+      ><span>An independent observatory. Not a productivity score.</span
       ><a
         href="https://github.com/dennisimoo/shipwatch"
         target="_blank"
         rel="noopener"
-        >Open source. Open methodology. ↗</a
+        >Open source. Open methodology.</a
       >
     </footer>
     <dialog id="add-dialog">
@@ -224,30 +224,50 @@
         </div>
         <h2>Who's shipping?</h2>
         <p>
-          Drop in a public website. We'll establish a baseline and start
-          checking for frontend releases.
+          Enter a website. Luna will review linked domains and subdomains; you
+          choose which ones to monitor.
         </p>
-        <label
-          >Website URL<input
-            name="url"
-            type="text"
-            required
-            maxlength="1500"
-            placeholder="https://your-company.com" /></label
-        ><label
-          >Company name <span class="muted">(optional)</span
-          ><input
-            name="name"
-            type="text"
-            maxlength="100"
-            placeholder="Your company" /></label
-        ><button class="button button-orange" id="submit-site" type="submit">
-          Start watching ↗
+        <fieldset id="discovery-inputs">
+          <label
+            >Website URL<input
+              name="url"
+              type="text"
+              required
+              maxlength="1500"
+              placeholder="https://your-company.com" /></label
+          ><label
+            >Website name <span class="muted">(optional)</span
+            ><input
+              name="name"
+              type="text"
+              maxlength="100"
+              placeholder="Your website"
+          /></label>
+          <p class="fine-print">
+            One URL per domain or subdomain. Discovery follows public links; it
+            does not enumerate hidden hosts. Choose at least one URL from the
+            results.
+          </p>
+        </fieldset>
+        <section id="discovery-review" hidden>
+          <div class="review-heading">
+            <h3>Choose your monitoring URLs</h3>
+            <button class="text-button" id="discovery-back" type="button">
+              Start over
+            </button>
+          </div>
+          <p id="discovery-summary"></p>
+          <div id="discovery-candidates"></div>
+          <p id="selection-count" role="status"></p>
+        </section>
+        <button class="button button-orange" id="submit-site" type="submit">
+          Discover URLs
         </button>
         <p id="submission-message" role="status"></p>
         <p class="fine-print">
           Public HTTP/HTTPS pages only. We respect robots.txt and don't sign
-          into websites.
+          into websites. Luna's suggestions can be checked or unchecked before
+          you start.
         </p>
       </form>
     </dialog>

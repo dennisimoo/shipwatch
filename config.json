@@ -1,0 +1,6 @@
+{
+  "discovery": {
+    "candidateLimit": 12,
+    "domainLimit": 3
+  }
+}

@@ -7,7 +7,7 @@ const { syncDirectory } = await import("../src/import-yc");
 
 function company() {
   return db
-    .query("SELECT * FROM companies WHERE id='test'")
+    .query("SELECT * FROM targets WHERE company_id='test'")
     .get() as Parameters<typeof recordSnapshot>[0];
 }
 function checkCompany(value: ReturnType<typeof company>) {
@@ -30,11 +30,14 @@ const count = () =>
 
 beforeEach(() => {
   db.exec(
-    "DELETE FROM daily_checks; DELETE FROM releases; DELETE FROM seen_versions; DELETE FROM companies;",
+    "DELETE FROM discovery_jobs; DELETE FROM targets; DELETE FROM daily_checks; DELETE FROM releases; DELETE FROM seen_versions; DELETE FROM companies;",
   );
   db.query(
-    "INSERT INTO companies(id,name,url,created_at,next_check) VALUES ('test','Test','https://example.com',?,?)",
-  ).run(now(), now());
+    "INSERT INTO companies(id,name,url,created_at) VALUES ('test','Test','https://example.com',?)",
+  ).run(now());
+  db.query(
+    "INSERT INTO targets(id,company_id,url,next_check) VALUES ('test','test','https://example.com',?)",
+  ).run(now());
   currentFingerprint = "baseline";
 });
 
@@ -76,12 +79,51 @@ test("failed checks never change the baseline or confirm a pending release", asy
   expect(company().candidate).toBeNull();
 });
 
+test("multiple target URLs retain separate baselines and deduplicate shared company versions", () => {
+  db.query(
+    "INSERT INTO targets(id,company_id,url,next_check) VALUES ('app-target','test','https://app.example.com',?)",
+  ).run(now());
+  const target = () =>
+    db.query("SELECT * FROM targets WHERE id='app-target'").get() as ReturnType<
+      typeof company
+    >;
+  checkCompany(company());
+  recordSnapshot(
+    target(),
+    { fingerprint: "app-baseline", assets: {}, evidence: "{}" },
+    now(),
+  );
+  expect(count()).toBe(0);
+  recordSnapshot(
+    target(),
+    { fingerprint: "shared-version", assets: {}, evidence: "{}" },
+    now(),
+  );
+  recordSnapshot(
+    target(),
+    { fingerprint: "shared-version", assets: {}, evidence: "{}" },
+    now(),
+  );
+  expect(count()).toBe(1);
+  expect(db.query("SELECT company_id,url FROM releases").get()).toEqual({
+    company_id: "test",
+    url: "https://app.example.com",
+  });
+  currentFingerprint = "shared-version";
+  checkCompany(company());
+  checkCompany(company());
+  expect(count()).toBe(1);
+});
+
 test("YC sync retains only the selected year's active companies and preserves community sites", () => {
   db.query(
-    "INSERT INTO companies(id,name,url,source,created_at,next_check) VALUES ('yc-1','Old','https://old.example.com','yc',?,?)",
-  ).run(now(), now());
+    "INSERT INTO companies(id,name,url,source,created_at) VALUES ('yc-1','Old','https://old.example.com','yc',?)",
+  ).run(now());
+  db.query(
+    "INSERT INTO targets(id,company_id,url,next_check) VALUES ('yc-1','yc-1','https://old.example.com',?)",
+  ).run(now());
   const old = db
-    .query("SELECT * FROM companies WHERE id='yc-1'")
+    .query("SELECT * FROM targets WHERE company_id='yc-1'")
     .get() as ReturnType<typeof company>;
   recordSnapshot(
     old,

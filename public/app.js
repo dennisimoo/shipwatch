@@ -65,7 +65,7 @@ async function loadSummary() {
   const result = await api("/api/summary");
   select("#stat-sites").textContent = number(result.enabled);
   select("#stat-sites-note").textContent =
-    `${number(result.baselined)} baselines · ${number(result.companies)} in directory`;
+    `${number(result.baselined)} baselines · ${number(result.targets)} monitored URLs`;
   select("#stat-releases").textContent = number(result.releases);
   select("#stat-weekend").textContent = number(result.weekend);
   select("#stat-coverage").textContent = result.enabled
@@ -84,7 +84,7 @@ async function loadSummary() {
   const batchSelect = select("#batch");
   const previous = batchSelect.value;
   batchSelect.innerHTML =
-    '<option value="">All batches + community</option>' +
+    '<option value="">All websites</option>' +
     result.batches
       .map(
         (batch) =>
@@ -112,10 +112,10 @@ async function loadCompanies() {
               queued: "Queued",
               stale: "Delayed",
             }[status] || status;
-          return `<tr class="company-row" data-company="${escape(company.id)}" tabindex="0" role="button" aria-label="View ${escape(company.name)}"><td class="rank">${state.page * 50 + index + 1}</td><td><div class="company-name"><span class="company-avatar">${escape(company.name.slice(0, 1))}</span><div><strong>${escape(company.name)}</strong><small>${escape(host(company.url))}</small></div></div></td><td><span class="batch-tag${company.batch ? "" : " community-tag"}">${escape(company.batch || "COMMUNITY")}</span></td><td class="numeric release-count">${company.baseline_at ? number(company.releases) : "—"}</td><td class="numeric muted">${company.baseline_at ? number(company.weekend) : "—"}</td><td class="last-ship" title="${escape(date(company.last_release))}">${company.last_release ? ago(company.last_release) : company.baseline_at ? "No release yet" : "Awaiting baseline"}</td><td><span class="monitor-state ${escape(status)}" title="${escape(company.error || "Last successful check: " + date(company.last_success))}">${label}</span></td><td class="row-arrow">↗</td></tr>`;
+          return `<tr class="company-row" data-company="${escape(company.id)}" tabindex="0" role="button" aria-label="View ${escape(company.name)}"><td class="rank">${state.page * 50 + index + 1}</td><td><div class="company-name"><span class="company-avatar">${escape(company.name.slice(0, 1))}</span><div><strong>${escape(company.name)}</strong><small>${escape(host(company.url))}</small></div></div></td><td><span class="batch-tag${company.batch ? "" : " community-tag"}">${escape(company.batch || "COMMUNITY")}</span></td><td class="numeric release-count">${company.baseline_at ? number(company.releases) : "—"}</td><td class="numeric muted">${company.baseline_at ? number(company.weekend) : "—"}</td><td class="last-ship" title="${escape(date(company.last_release))}">${company.last_release ? ago(company.last_release) : company.baseline_at ? "No release yet" : "Awaiting baseline"}</td><td><span class="monitor-state ${escape(status)}" title="${escape(company.error || "Last successful check: " + date(company.last_success))}">${label}</span></td></tr>`;
         })
         .join("")
-    : '<tr><td colspan="8" class="table-empty">No companies match this search. Try another name or batch.</td></tr>';
+    : '<tr><td colspan="7" class="table-empty">No companies match this search. Try another name or batch.</td></tr>';
   select("#results-label").textContent = result.total
     ? `${number(state.page * 50 + 1)}–${number(Math.min((state.page + 1) * 50, result.total))} of ${number(result.total)} sites · ${state.days}-day window`
     : "No results";
@@ -138,15 +138,36 @@ async function showCompany(id) {
     const result = await api("/api/company/" + encodeURIComponent(id));
     const company = result.company;
     select("#company-detail").innerHTML =
-      `<h2>${escape(company.name)}</h2><a class="detail-link" href="${escape(company.url)}" target="_blank" rel="noopener">${escape(host(company.url))} ↗</a><p>${escape(company.description)}</p><div class="detail-stats"><div><small>BASELINE ESTABLISHED</small><strong>${escape(date(company.baseline_at))}</strong></div><div><small>SUCCESSFUL CHECKS / ATTEMPTS</small><strong>${number(company.successes)} / ${number(company.checks)}</strong></div><div><small>LAST SUCCESSFUL CHECK</small><strong>${escape(date(company.last_success))}</strong></div><div><small>LAST CHECK ATTEMPT</small><strong>${escape(date(company.last_check))}</strong></div></div><div class="detail-status">${escape(company.error || "Monitoring public frontend changes every five minutes.")}</div><h3>Observed releases</h3>${result.releases.length ? result.releases.map((release) => `<article class="detail-event"><time>${escape(date(release.detected_at))}</time><p>Changed between ${escape(date(release.previous_at))} and ${escape(date(release.detected_at))}. Confirmed ${escape(date(release.confirmed_at))}.</p><details><summary>Inspect release evidence</summary><pre>${escape(JSON.stringify(JSON.parse(release.evidence), null, 2))}</pre></details></article>`).join("") : "<p>No confirmed releases yet. Monitoring starts from the baseline; historical deploys cannot be reconstructed from these checks.</p>"}<p class="fine-print">Showing up to 100 most recent releases. Times are UTC. Backend-only deploys, commits, and working hours are not observable.</p>`;
+      `<h2>${escape(company.name)}</h2><a class="detail-link" href="${escape(company.url)}" target="_blank" rel="noopener">${escape(host(company.url))}</a><p>${escape(company.description)}</p><div class="detail-stats"><div><small>BASELINE ESTABLISHED</small><strong>${escape(date(company.baseline_at))}</strong></div><div><small>SUCCESSFUL CHECKS / ATTEMPTS</small><strong>${number(company.successes)} / ${number(company.checks)}</strong></div><div><small>LAST SUCCESSFUL CHECK</small><strong>${escape(date(company.last_success))}</strong></div><div><small>LAST CHECK ATTEMPT</small><strong>${escape(date(company.last_check))}</strong></div></div><div class="detail-status">${escape(company.error || "Monitoring public frontend changes every five minutes.")}</div><h3>Observed releases</h3>${result.releases.length ? result.releases.map((release) => `<article class="detail-event"><time>${escape(date(release.detected_at))}</time><p>Changed between ${escape(date(release.previous_at))} and ${escape(date(release.detected_at))}. Confirmed ${escape(date(release.confirmed_at))}.</p><details><summary>Inspect release evidence</summary><pre>${escape(JSON.stringify(JSON.parse(release.evidence), null, 2))}</pre></details></article>`).join("") : "<p>No confirmed releases yet. Monitoring starts from the baseline; historical deploys cannot be reconstructed from these checks.</p>"}<p class="fine-print">Showing up to 100 most recent releases. Times are UTC. Backend-only deploys, commits, and working hours are not observable.</p>`;
+    const monitoring = document.createElement("section");
+    const discovery = result.discovery;
+    const review = discovery?.review ? JSON.parse(discovery.review) : null;
+    const note =
+      discovery?.error ||
+      (review && !review.recommended.length
+        ? "Luna recommended no product URL. The existing website remains monitored."
+        : discovery?.status === "ready"
+          ? "Luna review complete. These are the selected monitoring URLs."
+          : "App URL discovery is queued or running; the current website remains monitored.");
+    monitoring.innerHTML = `<h3>Monitoring ${result.targets.length} ${result.targets.length === 1 ? "domain" : "domains"}</h3><p>${escape(note)}</p>${result.targets.map((target) => `<div class="monitor-target"><a href="${escape(target.url)}" target="_blank" rel="noopener">${escape(target.url)}</a><span>${escape(target.status)} · last success ${escape(ago(target.last_success))}</span></div>`).join("")}<p class="fine-print">${discovery ? `Discovery budget: ${number(discovery.candidate_limit)} domains · monitoring cap: ${number(discovery.domain_limit)}.` : ""} New URL selections start with a fresh baseline. Earlier releases retain their original URL in the evidence.</p>`;
+    select("#company-detail").querySelector(".detail-status").after(monitoring);
   } catch (error) {
     select("#company-detail").textContent = error.message;
   }
 }
-select("#add-button").addEventListener("click", () =>
-  select("#add-dialog").showModal(),
-);
-for (const id of ["#method-button", "#method-inline"])
+select("#add-button").addEventListener("click", async () => {
+  select("#add-dialog").showModal();
+  try {
+    const options = await api("/api/discovery-options");
+    if (!options.available)
+      select("#submission-message").textContent =
+        "AI discovery is not configured on this server yet.";
+  } catch {
+    select("#submission-message").textContent =
+      "Could not load discovery settings. Try again shortly.";
+  }
+});
+for (const id of ["#method-button", "#method-inline", "#hero-method"])
   select(id).addEventListener("click", () =>
     select("#method-dialog").showModal(),
   );
@@ -198,31 +219,90 @@ select("#next").addEventListener("click", () => {
   state.page++;
   refresh();
 });
+let discoveryDraft = null;
+function updateSelection() {
+  if (!discoveryDraft) return;
+  const selected = [
+    ...document.querySelectorAll(".candidate-checkbox:checked"),
+  ];
+  const maximum = discoveryDraft.review.options.domainLimit;
+  select("#selection-count").textContent =
+    `${selected.length} selected · choose 1–${maximum}`;
+  select("#submit-site").disabled =
+    selected.length < 1 || selected.length > maximum;
+  select("#submit-site").textContent =
+    `Monitor ${selected.length} selected ${selected.length === 1 ? "URL" : "URLs"}`;
+}
+select("#discovery-candidates").addEventListener("change", updateSelection);
+select("#discovery-back").addEventListener("click", () => {
+  discoveryDraft = null;
+  select("#discovery-inputs").disabled = false;
+  select("#discovery-inputs").hidden = false;
+  select("#discovery-review").hidden = true;
+  select("#submit-site").disabled = false;
+  select("#submit-site").textContent = "Discover URLs";
+  select("#submission-message").textContent = "";
+});
 select("#add-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = select("#submit-site");
   button.disabled = true;
-  button.textContent = "Checking the website…";
+  button.textContent = discoveryDraft
+    ? "Starting monitoring…"
+    : "Discovering and reviewing with Luna…";
   select("#submission-message").textContent = "";
   try {
-    const result = await api("/api/companies", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.fromEntries(new FormData(event.target))),
-    });
+    const fields = Object.fromEntries(new FormData(event.target));
+    const body = discoveryDraft
+      ? {
+          token: discoveryDraft.token,
+          selected: [
+            ...document.querySelectorAll(".candidate-checkbox:checked"),
+          ].map((element) => element.value),
+        }
+      : fields;
+    const result = await api(
+      discoveryDraft ? "/api/companies" : "/api/discover",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    if (result.review) {
+      discoveryDraft = result;
+      select("#discovery-inputs").disabled = true;
+      select("#discovery-inputs").hidden = true;
+      select("#discovery-review").hidden = false;
+      select("#discovery-summary").textContent =
+        `Inspected ${result.review.candidates.length} of ${result.review.discovered} discovered domains. Luna suggested ${result.review.recommended.length}. Check or uncheck any inspectable URL; select at least one.`;
+      select("#discovery-candidates").innerHTML = result.review.candidates
+        .map(
+          (candidate) =>
+            `<label class="candidate-choice"><input class="candidate-checkbox" type="checkbox" value="${escape(candidate.url)}" ${result.review.recommended.includes(candidate.url) ? "checked" : ""} ${candidate.error ? "disabled" : ""}><span><strong>${escape(candidate.title || host(candidate.url))}</strong><small>${escape(candidate.url)}</small><small>${escape(candidate.error || (candidate.probability === null ? "No decision" : `Luna: ${Math.round(candidate.probability * 100)}% yes${candidate.probability >= 0.7 ? " · recommended" : " · not recommended"}`))}</small></span></label>`,
+        )
+        .join("");
+      updateSelection();
+      return;
+    }
     select("#submission-message").textContent = result.existing
       ? "Already in the index. Opening its profile…"
       : "Added. The first check will establish its baseline.";
     await refresh();
     setTimeout(() => {
       select("#add-dialog").close();
+      select("#discovery-back").click();
+      event.target.reset();
       showCompany(result.company.id);
     }, 900);
   } catch (error) {
     select("#submission-message").textContent = error.message;
   } finally {
-    button.disabled = false;
-    button.textContent = "Start watching ↗";
+    if (discoveryDraft) updateSelection();
+    else {
+      button.disabled = false;
+      button.textContent = "Discover URLs";
+    }
   }
 });
 refresh();

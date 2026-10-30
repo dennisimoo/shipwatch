@@ -47,8 +47,8 @@ export function syncDirectory(companies: YCCompany[], year: string) {
   const ids = selected.map((company) => `yc-${company.id}`);
   const removed = `SELECT id FROM companies WHERE source='yc' AND id NOT IN (${ids.map(() => "?").join(",")})`;
   const insert =
-    db.query(`INSERT INTO companies (id,name,url,batch,description,yc_url,source,enabled,created_at,next_check)
-    VALUES (?,?,?,?,?,?,'yc',?,?,?) ON CONFLICT(id) DO UPDATE SET
+    db.query(`INSERT INTO companies (id,name,url,batch,description,yc_url,source,enabled,created_at)
+    VALUES (?,?,?,?,?,?,'yc',?,?) ON CONFLICT(id) DO UPDATE SET
     name=excluded.name,url=excluded.url,batch=excluded.batch,description=excluded.description,
     yc_url=excluded.yc_url,enabled=excluded.enabled`);
   db.transaction(() => {
@@ -62,10 +62,24 @@ export function syncDirectory(companies: YCCompany[], year: string) {
         company.url || "",
         1,
         now(),
+      );
+      db.query(
+        "INSERT INTO targets(id,company_id,url,next_check) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM targets WHERE company_id=?)",
+      ).run(
+        `yc-${company.id}`,
+        `yc-${company.id}`,
+        company.website,
         now() + Math.floor(Math.random() * 300),
+        `yc-${company.id}`,
       );
     }
-    for (const table of ["releases", "seen_versions", "daily_checks"]) {
+    for (const table of [
+      "releases",
+      "seen_versions",
+      "daily_checks",
+      "targets",
+      "discovery_jobs",
+    ]) {
       db.query(`DELETE FROM ${table} WHERE company_id IN (${removed})`).run(
         ...ids,
       );
