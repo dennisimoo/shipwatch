@@ -31,6 +31,9 @@ test("normalization ignores injected Sentry metadata but preserves application v
     .toBe('const example="http://[invalid].js";');
   expect(normalizeContent('window.SENTRY_RELEASE={id:"first"};', "https://example.com/main.js"))
     .toBe(normalizeContent('window.SENTRY_RELEASE={id:"second"};', "https://example.com/main.js"));
+  const debug = (id: string) => `var context=window;context._debugIds||(context._debugIds={});(context._debugIds||(context._debugIds={}))[stack]="${id}";`;
+  expect(normalizeContent(debug("11111111-1111-1111-1111-111111111111"), "https://example.com/main.js"))
+    .toBe(normalizeContent(debug("22222222-2222-2222-2222-222222222222"), "https://example.com/main.js"));
   expect(normalizeContent('s.setAttribute("data-deployment-id","dpl_first");', "https://example.com/webpack-abcdef123.js"))
     .toBe(normalizeContent('s.setAttribute("data-deployment-id","dpl_second");', "https://example.com/webpack-123abcdef.js"));
   expect(normalizeContent('self.__BUILD_MANIFEST={"/":["static/chunks/123-abcdef123456.js"]};', "https://example.com/_next/static/build/_buildManifest.js"))
@@ -55,6 +58,21 @@ test("snapshots capture sibling scripts and imports, never another tenant", asyn
   const result = await snapshot("https://app.example.com/", {});
   expect(Object.keys(result.assets)).toEqual(["https://cdn.example.com/main.js", "https://assets.example.com/child.js"]);
   expect(seen.some((url) => url.includes("evil.com"))).toBe(false);
+});
+
+test("capture follows up to 128 assets and retains the five-megabyte asset bound", async () => {
+  const limits: number[] = [];
+  mockFetch = spyOn(network, "fetchPublic").mockImplementation(async (url, _headers, limit) => {
+    if (limit) limits.push(limit);
+    const html = url === "https://example.com/";
+    const body = html ? Array.from({ length: 130 }, (_, index) => `<script src="/asset-${index}.js"></script>`).join("") : "export const value=1;";
+    return { url, body, status: 200, headers: { "content-type": html ? "text/html" : "application/javascript" }, bytes: body.length };
+  });
+  const result = await snapshot("https://example.com/", {});
+  expect(Object.keys(result.assets)).toHaveLength(128);
+  expect(JSON.parse(result.evidence).uninspected).toHaveLength(2);
+  expect(Math.max(...limits)).toBe(5_000_000);
+  expect(result.captureScope).toBe("registrable-128-v2");
 });
 
 test("snapshots ignore rebuild metadata, follow actual child changes, and reuse conditional caches", async () => {

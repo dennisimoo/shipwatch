@@ -16,6 +16,7 @@ interface Evidence {
 }
 const printer = new Bun.Transpiler({ loader: "js", minifyWhitespace: false });
 export const analysisModel = "gpt-6-luna";
+export const analysisVersion = 2;
 
 export function saveBody(digest: string, body: string) {
   if (hash(body) !== digest) throw new Error("Bundle archive hash mismatch");
@@ -29,49 +30,123 @@ function body(digest: string) {
   return gunzipSync(row.body).toString();
 }
 
-export function comparison(before: Evidence, after: Evidence) {
-  const group = (evidence: Evidence) => {
-    const entries = new Map<string, Evidence["content"]>();
-    for (const entry of evidence.content) {
-      const key = assetIdentity(entry.url);
-      entries.set(key, [...entries.get(key) ?? [], entry]);
-    }
-    return entries;
+export function comparison(before: Evidence, after: Evidence): { patch: string; unseenChanged: boolean; reasons?: string[] } {
+  type Entry = Evidence["content"][number];
+  const previous = new Set(before.content);
+  const current = new Set(after.content);
+  const pairs: [Entry | undefined, Entry | undefined][] = [];
+  const reasons = new Set<string>();
+  const canonicalUrl = (address: string) => {
+    const url = new URL(address);
+    url.searchParams.delete("dpl");
+    url.hash = "";
+    return url.href;
   };
-  const previous = group(before);
-  const current = group(after);
-  let patch = "";
-  let unseenChanged = JSON.stringify([...(before.uninspected ?? [])].sort()) !==
-    JSON.stringify([...(after.uninspected ?? [])].sort());
-  for (const key of new Set([...previous.keys(), ...current.keys()])) {
-    const oldEntries = previous.get(key) ?? [];
-    const newEntries = current.get(key) ?? [];
-    if (oldEntries.length > 1 || newEntries.length > 1) {
-      unseenChanged = true;
-      continue;
+  const exactUrl = (entry: Entry) => canonicalUrl(entry.url);
+  let unseenChanged = JSON.stringify((before.uninspected ?? []).map(canonicalUrl).sort()) !==
+    JSON.stringify((after.uninspected ?? []).map(canonicalUrl).sort());
+  if (unseenChanged) reasons.add("The uncaptured asset inventory changed");
+  if (new Set(before.content.map(exactUrl)).size !== before.content.length ||
+    new Set(after.content.map(exactUrl)).size !== after.content.length) {
+    unseenChanged = true;
+    reasons.add("Duplicate asset URLs in saved evidence");
+  }
+  const sources = new Map<Entry, string>();
+  const normalized = (entry: Entry) => {
+    if (!sources.has(entry)) sources.set(entry, normalizeContent(body(entry.hash), entry.url)
+      .replace(/([?&]dpl=)dpl_[A-Za-z0-9]+/g, "$1VERCEL_DEPLOYMENT_ID"));
+    return sources.get(entry)!;
+  };
+  const match = (key: (entry: Entry) => string, equivalent = false) => {
+    const group = (entries: Set<Entry>) => {
+      const groups = new Map<string, Entry[]>();
+      for (const entry of entries) {
+        const identity = key(entry);
+        groups.set(identity, [...groups.get(identity) ?? [], entry]);
+      }
+      return groups;
+    };
+    const oldGroups = group(previous);
+    const newGroups = group(current);
+    for (const [identity, oldEntries] of oldGroups) {
+      const newEntries = newGroups.get(identity) ?? [];
+      if (!newEntries.length || (!equivalent && (oldEntries.length !== 1 || newEntries.length !== 1))) continue;
+      for (let index = 0; index < Math.min(oldEntries.length, newEntries.length); index++) {
+        const old = oldEntries[index];
+        const next = newEntries[index];
+        pairs.push([old, next]);
+        previous.delete(old);
+        current.delete(next);
+      }
     }
-    const old = oldEntries[0];
-    const next = newEntries[0];
+  };
+  const location = (entry: Entry) => {
+    const url = new URL(exactUrl(entry));
+    return url.origin + url.pathname.slice(0, url.pathname.lastIndexOf("/") + 1) + url.search + (/\.css(?:\?|$)/.test(entry.url) ? " css" : " js");
+  };
+  match(exactUrl);
+  match((entry) => location(entry) + " " + entry.hash, true);
+  match((entry) => location(entry) + " " + hash(normalized(entry)), true);
+  const identity = (entry: Entry) => assetIdentity(entry.url)
+    .replace(/(\/_next\/static\/(?:immutable\/)?chunks\/)turbopack-[\w-]+\.js/, "$1turbopack-CONTENT.js")
+    .replace(/(\/_next\/static\/(?:immutable\/)?chunks\/)(?=[\w-]*\d)[\w-]{12,64}\.js/, "$1CONTENT.js");
+  match(identity);
+  const remaining = new Set([...previous].map(identity));
+  if ([...current].some((entry) => remaining.has(identity(entry)))) {
+    unseenChanged = true;
+    reasons.add("Some renamed assets could not be paired uniquely");
+  }
+  pairs.push(...[...previous].map((entry): [Entry, undefined] => [entry, undefined]),
+    ...[...current].map((entry): [undefined, Entry] => [undefined, entry]));
+  const chunks: string[] = [];
+  for (const [old, next] of pairs) {
     if (old?.hash === next?.hash) continue;
     const format = (entry: typeof old) => {
       if (!entry) return "";
-      const source = normalizeContent(body(entry.hash), entry.url)
-        .replace(/([?&]dpl=)dpl_[A-Za-z0-9]+/g, "$1VERCEL_DEPLOYMENT_ID");
+      const source = normalized(entry);
       if (apiSchema(source)) return JSON.stringify(JSON.parse(source), null, 2);
       return /\.css(?:\?|$)/.test(entry.url) ? source : printer.transformSync(source);
     };
     const oldSource = format(old);
     const newSource = format(next);
     if (oldSource === newSource) continue;
-    if (/\.u\s*=/.test(oldSource + newSource)) unseenChanged = true;
-    const difference = structuredPatch(key, key, oldSource, newSource, "before", "after", {
+    const runtime = (oldSource + newSource).replace(
+      /\.u\s*=\s*function\s*\([^)]*\)\s*\{\s*return\s+[\w$]+\.loadWebAssemblyModule\([^{}]*\);\s*\}/g, "",
+    );
+    if (/\.u\s*=/.test(runtime)) {
+      unseenChanged = true;
+      reasons.add("Changed runtime may reference uncaptured dynamic chunks");
+    }
+    const oldFile = old ? exactUrl(old) : "(added)";
+    const newFile = next ? exactUrl(next) : "(removed)";
+    const difference = structuredPatch(oldFile, newFile, oldSource, newSource, "before", "after", {
       context: 3, timeout: 100, maxEditLength: 10000,
     });
-    const chunk = JSON.stringify(difference ?? { file: key, before: oldSource, after: newSource }) + "\n";
-    if (patch.length + chunk.length > 400000) unseenChanged = true;
-    else patch += chunk;
+    if (difference) {
+      for (const hunk of difference.hunks) chunks.push(JSON.stringify({ oldFile, newFile,
+        hunk: { ...hunk, lines: hunk.lines.map((line) => line.startsWith(" ") && line.length > 2000
+          ? ` [unchanged context omitted: ${line.length - 1} characters]` : line) },
+      }) + "\n");
+    } else {
+      const oldLines = oldSource.split("\n");
+      const newLines = newSource.split("\n");
+      let start = 0;
+      while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) start++;
+      let oldEnd = oldLines.length;
+      let newEnd = newLines.length;
+      while (oldEnd > start && newEnd > start && oldLines[oldEnd - 1] === newLines[newEnd - 1]) { oldEnd--; newEnd--; }
+      chunks.push(JSON.stringify({ oldFile, newFile, startLine: start + 1,
+        before: oldLines.slice(start, oldEnd).join("\n"), after: newLines.slice(start, newEnd).join("\n") }) + "\n");
+    }
   }
-  return { patch, unseenChanged };
+  let patch = "";
+  for (const chunk of chunks.sort((left, right) => left.length - right.length)) {
+    if (patch.length + chunk.length > 400000) {
+      unseenChanged = true;
+      reasons.add("Some changed hunks exceeded the 400000-character comparison budget");
+    } else patch += chunk;
+  }
+  return { patch, unseenChanged, reasons: [...reasons] };
 }
 
 export async function classifyChange(input: ReturnType<typeof comparison> & { apiChanges?: Awaited<ReturnType<typeof apiChanges>>; apiWarning?: string }, client?: OpenAI): Promise<Analysis> {
@@ -115,8 +190,8 @@ export async function analyzeNext() {
     .run(now() + 120, pending.release_id, now()).changes) return true;
   try {
     const cached = db.query(`SELECT a.classification,a.summary FROM change_analysis a JOIN releases r ON r.id=a.release_id
-      WHERE a.before_fingerprint=? AND r.fingerprint=? AND a.model=? AND a.classification IS NOT NULL LIMIT 1`)
-      .get(pending.before_fingerprint, pending.fingerprint, analysisModel) as Analysis | null;
+      WHERE a.before_fingerprint=? AND r.fingerprint=? AND a.model=? AND a.analysis_version=? AND a.classification IS NOT NULL LIMIT 1`)
+      .get(pending.before_fingerprint, pending.fingerprint, analysisModel, analysisVersion) as Analysis | null;
     const before = db.query("SELECT evidence FROM bundle_versions WHERE fingerprint=?").get(pending.before_fingerprint) as { evidence: string } | null;
     if (!cached && !before) throw new Error("Previous bundle version was not archived");
     let analysis = cached;
@@ -133,14 +208,14 @@ export async function analyzeNext() {
       }
       analysis = await classifyChange(input);
     }
-    db.query(`UPDATE change_analysis SET classification=?,summary=?,model=?,analyzed_at=?,error=NULL WHERE release_id=?`)
-      .run(analysis.classification, analysis.summary.trim(), analysisModel, now(), pending.release_id);
+    db.query(`UPDATE change_analysis SET classification=?,summary=?,model=?,analysis_version=?,analyzed_at=?,error=NULL WHERE release_id=?`)
+      .run(analysis.classification, analysis.summary.trim(), analysisModel, analysisVersion, now(), pending.release_id);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const unavailable = /not archived|Ambiguous|limits/.test(message) || pending.attempts >= 2;
-    db.query(`UPDATE change_analysis SET classification=?,summary=?,attempts=attempts+1,next_attempt=?,error=? WHERE release_id=?`)
+    db.query(`UPDATE change_analysis SET classification=?,summary=?,attempts=attempts+1,next_attempt=?,error=?,analysis_version=? WHERE release_id=?`)
       .run(unavailable ? "uncertain" : null, unavailable ? "Not enough captured evidence to describe this change." : null,
-        now() + 300 * 2 ** pending.attempts, message.slice(0, 240), pending.release_id);
+        now() + 300 * 2 ** pending.attempts, message.slice(0, 240), analysisVersion, pending.release_id);
   }
   return true;
 }

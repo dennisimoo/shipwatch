@@ -14,7 +14,7 @@ export interface Asset {
 }
 
 const scanner = new Bun.Transpiler({ loader: "js" });
-const assetLimit = 32;
+const assetLimit = 128;
 const byteLimit = 20_000_000;
 
 export function assetIdentity(address: string): string {
@@ -31,7 +31,7 @@ export function assetIdentity(address: string): string {
 
 export function normalizeContent(source: string, address: string): string {
   const debugIds = source.matchAll(
-    /_sentryDebugIds\[[^\]]+\]\s*=\s*["'`]([0-9a-f-]{36})["'`]/gi,
+    /(?:_sentryDebugIds|_debugIds)(?:\[[^\]]+\]|\s*\|\|\s*\([^)]*\)\s*\)\s*\[[^\]]+\])\s*=\s*["'`]([0-9a-f-]{36})["'`]/gi,
   );
   let normalized = source;
   for (const match of debugIds)
@@ -124,7 +124,7 @@ export async function snapshot(
     const contentHash = hash(JSON.stringify(JSON.parse(page.body)));
     saveBody?.(digest, page.body);
     const evidence = JSON.stringify({ method: "content-v3", content: [{ url: page.url, hash: digest, contentHash }] });
-    return { fingerprint: "content-v3:" + contentHash, assets: {}, evidence, bytes: page.bytes, captureScope: "registrable-v1" };
+    return { fingerprint: "content-v3:" + contentHash, assets: {}, evidence, bytes: page.bytes, captureScope: "registrable-128-v2" };
   }
   if (!String(page.headers["content-type"] || "").includes("text/html"))
     throw new Error("Website did not return HTML or a public API schema");
@@ -154,7 +154,7 @@ export async function inspectBundles(
       throw new Error("Script monitoring disallowed by robots.txt");
     const old = previous[script];
     const headers: Record<string, string> = {};
-    const currentCache = old?.method === "content-v3";
+    const currentCache = old?.method === "content-v3.1";
     if (currentCache && old.etag) headers["If-None-Match"] = old.etag;
     if (currentCache && old.modified) headers["If-Modified-Since"] = old.modified;
     if (bytes >= byteLimit) throw new Error("Bundle inspection exceeds size limit");
@@ -170,7 +170,7 @@ export async function inspectBundles(
       assets[script] = {
         hash: hash(asset.body),
         contentHash: hash(normalizeContent(asset.body, asset.url)),
-        method: "content-v3",
+        method: "content-v3.1",
         references: bundleReferences(asset.body, asset.url),
         etag: asset.headers.etag,
         modified: asset.headers["last-modified"],
@@ -202,5 +202,5 @@ export async function inspectBundles(
     .map(([address, asset]) => [assetIdentity(address), asset.contentHash])
     .sort();
   const uninspected = queue.filter((script) => !assets[script]).map(assetIdentity).sort();
-  return { fingerprint: "content-v3:" + hash(JSON.stringify({ content, uninspected })), assets, evidence, bytes, captureScope: "registrable-v1" };
+  return { fingerprint: "content-v3:" + hash(JSON.stringify({ content, uninspected })), assets, evidence, bytes, captureScope: "registrable-128-v2" };
 }

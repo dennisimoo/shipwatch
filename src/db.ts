@@ -76,6 +76,8 @@ db.exec(`
 
 if (!(db.query("PRAGMA table_info(targets)").all() as { name: string }[]).some((column) => column.name === "capture_scope"))
   db.exec("ALTER TABLE targets ADD COLUMN capture_scope TEXT");
+if (!(db.query("PRAGMA table_info(change_analysis)").all() as { name: string }[]).some((column) => column.name === "analysis_version"))
+  db.exec("ALTER TABLE change_analysis ADD COLUMN analysis_version INTEGER NOT NULL DEFAULT 1");
 
 if (
   !(db.query("PRAGMA table_info(releases)").all() as { name: string }[]).some(

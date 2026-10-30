@@ -89,3 +89,51 @@ test("a large SDK diff does not hide a small inspectable application change", ()
   expect(input.patch).toContain("after");
   expect(input.patch.length).toBeLessThan(400000);
 });
+
+test("exact URLs pair before hash-collapsed groups and renamed contents pair safely", () => {
+  const before = evidence('const stable=1;', "https://example.com/_next/static/chunks/123456abcdef.js?dpl=dpl_old");
+  before.content.push(...evidence('const feature=1;', "https://example.com/_next/static/chunks/abcdef123456.js?dpl=dpl_old").content);
+  const after = evidence('const stable=1;', "https://example.com/_next/static/chunks/123456abcdef.js?dpl=dpl_new");
+  after.content.push(...evidence('const feature=2;', "https://example.com/_next/static/chunks/fedcba654321.js?dpl=dpl_new").content);
+  const result = comparison(before, after);
+  expect(result.unseenChanged).toBe(false);
+  expect(result.patch).toContain("feature = 2");
+  expect(result.patch).not.toContain("stable = 1");
+  const renamed = evidence('const stable=1;', "https://example.com/_next/static/chunks/0m9abz2od-1_1.js");
+  expect(comparison(before, { content: [...renamed.content, before.content[1]] }).patch).toBe("");
+});
+
+test("renamed Next chunks compare as small changes rather than whole-file removals", () => {
+  const library = Array.from({ length: 5000 }, (_, index) => `function sdk${index}(){return ${index};}`).join("\n");
+  const before = evidence(library + '\nconst version="old";', "https://example.com/_next/static/chunks/3s8gmdxbgu990.js");
+  const after = evidence(library + '\nconst version="new";', "https://example.com/_next/static/chunks/03z-24k4s418j.js");
+  const result = comparison(before, after);
+  expect(result.unseenChanged).toBe(false);
+  expect(result.patch.length).toBeLessThan(2000);
+  expect(result.patch).toContain('version = \\"new\\"');
+});
+
+test("separate hunks preserve small changes in the same large asset", () => {
+  const spacing = Array.from({ length: 20 }, (_, index) => `function gap${index}(){return ${index};}`).join("\n");
+  const before = evidence(`const sdk=${JSON.stringify("x".repeat(450000))};\n${spacing}\nconst feature=false;`);
+  const after = evidence(`const sdk=${JSON.stringify("y".repeat(450000))};\n${spacing}\nconst feature=true;`);
+  const result = comparison(before, after);
+  expect(result.unseenChanged).toBe(true);
+  expect(result.patch).toContain("feature = true");
+  expect(result.patch.length).toBeLessThan(400000);
+});
+
+test("Turbopack WebAssembly loading is not mistaken for an unresolved JS chunk map", () => {
+  const source = 'runtime.u=function(t,r){return environment.loadWebAssemblyModule(parent,this.id,t,r);};';
+  const before = evidence(source + 'const version=1;');
+  const after = evidence(source + 'const version=2;');
+  expect(comparison(before, after).unseenChanged).toBe(false);
+  const webpack = 'runtime.u=chunk=>"/static/"+chunk+".js";';
+  expect(comparison(evidence(webpack + 'const version=1;'), evidence(webpack + 'const version=2;')).unseenChanged).toBe(true);
+});
+
+test("uncaptured names ignore deployment parameters, never changed content filenames", () => {
+  const before = { ...evidence("const stable=1;"), uninspected: ["https://example.com/chunk-ABCDEFGH.js?dpl=dpl_one"] };
+  expect(comparison(before, { ...before, uninspected: ["https://example.com/chunk-ABCDEFGH.js?dpl=dpl_two"] }).unseenChanged).toBe(false);
+  expect(comparison(before, { ...before, uninspected: ["https://example.com/chunk-IJKLMNOP.js?dpl=dpl_two"] }).unseenChanged).toBe(true);
+});
