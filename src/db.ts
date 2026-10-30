@@ -69,6 +69,11 @@ db.exec(`
     candidate_limit INTEGER NOT NULL DEFAULT 12 CHECK(candidate_limit BETWEEN 1 AND 30),
     next_attempt INTEGER NOT NULL DEFAULT 0, error TEXT, review TEXT, updated_at INTEGER
   );
+  CREATE TABLE IF NOT EXISTS deploys (
+    company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE, url TEXT NOT NULL,
+    deployment TEXT NOT NULL, first_seen INTEGER NOT NULL, baseline INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(company_id, deployment)
+  );
   CREATE TABLE IF NOT EXISTS discovery_drafts (
     token TEXT PRIMARY KEY, payload TEXT NOT NULL, expires_at INTEGER NOT NULL
   );
@@ -208,6 +213,12 @@ export function recordSnapshot(
       hash(JSON.stringify([company.company_id, company.url, result.evidence])), company.company_id,
       company.url, result.fingerprint, result.evidence, confirmed, confirmed,
     );
+    const deployment = (JSON.parse(result.evidence) as { deployment?: unknown }).deployment;
+    if (typeof deployment === "string")
+      db.query(`INSERT OR IGNORE INTO deploys(company_id,url,deployment,first_seen,baseline)
+        VALUES (?,?,?,?,NOT EXISTS(SELECT 1 FROM deploys WHERE company_id=? AND url=?))`).run(
+        company.company_id, company.url, deployment, confirmed, company.company_id, company.url,
+      );
     const contentTracking = result.fingerprint.startsWith("content-v3:");
     const transitioning = contentTracking && (!company.fingerprint?.startsWith("content-v3:") ||
       (result.captureScope !== undefined && result.captureScope !== company.capture_scope));

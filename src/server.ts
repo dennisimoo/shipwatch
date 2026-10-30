@@ -252,8 +252,12 @@ const server = Bun.serve({
           dailyReleases,
           now(),
         );
+        const deploys = db.query(`SELECT COUNT(*) AS count,MAX(first_seen) AS latest,
+            (SELECT COUNT(*) FROM deploys WHERE company_id=?) AS tracked
+            FROM deploys WHERE company_id=? AND baseline=0 AND first_seen>=?`).get(id, id, now() - 30 * 86400);
         return json({
           company,
+          deploys,
           releases,
           coverage,
           targets,

@@ -50,3 +50,10 @@ test("rate limits and bot challenges become backoff, never content", () => {
   expect(retryAfterSeconds("999999", 900)).toBe(21600);
   expect(retryAfterSeconds(undefined, 600)).toBe(600);
 });
+
+test("deploy IDs prefer Vercel deployment IDs over build IDs", async () => {
+  const { deploymentId } = await import("../src/detect");
+  expect(deploymentId('<script src="/_next/static/chunks/a.js?dpl=dpl_GbxEX696tcdKJaiufyixNZGAgroB">', "abc")).toBe("dpl_GbxEX696tcdKJaiufyixNZGAgroB");
+  expect(deploymentId("<html></html>", "abc")).toBe("next:abc");
+  expect(deploymentId("<html></html>", null)).toBe(null);
+});

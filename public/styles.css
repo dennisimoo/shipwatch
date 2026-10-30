@@ -1105,3 +1105,8 @@ dialog .candidate-choice input {
   text-transform: uppercase;
   color: var(--muted);
 }
+.deploy-note {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}

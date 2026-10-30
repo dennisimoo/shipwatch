@@ -112,6 +112,12 @@ export function hostingFromHeaders(headers: Record<string, unknown>): string[] {
   return hostingHeaders.filter(([, test]) => test(headers)).map(([name]) => name);
 }
 
+/** Platform deploy identifiers: Vercel's dpl_ IDs (stable per deployment), else the Next.js buildId. */
+export function deploymentId(html: string, build: string | null): string | null {
+  const vercel = /\bdpl_[A-Za-z0-9]{10,64}\b/.exec(html)?.[0];
+  return vercel ?? (build ? "next:" + build : null);
+}
+
 export async function extractScripts(
   html: string,
   base: string,
@@ -168,7 +174,9 @@ export async function snapshot(
   const result = await inspectBundles(page.url, scripts, previous, page.bytes, build, saveBody);
   result.transferBytes += page.transferBytes ?? page.bytes;
   const hosting = hostingFromHeaders(page.headers);
-  if (hosting.length) result.evidence = JSON.stringify({ ...JSON.parse(result.evidence), hosting });
+  const deployment = deploymentId(page.body, build);
+  if (hosting.length || deployment)
+    result.evidence = JSON.stringify({ ...JSON.parse(result.evidence), ...(hosting.length ? { hosting } : {}), ...(deployment ? { deployment } : {}) });
   return result;
 }
 
