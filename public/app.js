@@ -11,11 +11,22 @@ const number = (value) => Number(value || 0).toLocaleString();
 const date = (timestamp) =>
   timestamp
     ? new Date(timestamp * 1000).toLocaleString(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-        timeZone: "UTC",
-      }) + " UTC"
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
     : "Not yet";
+function releaseTimestamp(timestamp) {
+  const value = new Date(timestamp * 1000);
+  const day = value.toLocaleDateString(undefined, {
+    month: "short", day: "numeric",
+    ...(value.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }),
+  });
+  const time = value.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `<time datetime="${value.toISOString()}" title="${escape(date(timestamp))}" aria-label="${escape(date(timestamp))}"><span>${escape(day)}</span><span>${escape(time)}</span></time>`;
+}
 function ago(timestamp) {
   if (!timestamp) return "—";
   const seconds = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
@@ -31,6 +42,9 @@ function host(url) {
     return url;
   }
 }
+function favicon(url) {
+  return `<img class="favicon" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(new URL(url).hostname)}&sz=64" width="20" height="20" alt="" loading="lazy" referrerpolicy="no-referrer">`;
+}
 const state = { days: 30, search: "", batch: "", sort: "releases", page: 0 };
 let companiesRequest = 0;
 async function api(path, options) {
@@ -41,26 +55,28 @@ async function api(path, options) {
 }
 async function loadSummary() {
   const result = await api("/api/summary");
-  select("#coverage-note").textContent =
-    `${number(result.enabled)} websites. ${number(result.fresh)} checked in the last 15 minutes. Updated every five minutes.`;
   if (result.activity.length)
     select("#feed").innerHTML = result.activity
       .map(
         (event) =>
-          `<a class="feed-item" href="/company/${encodeURIComponent(event.company_id)}"><div><strong>${escape(event.name)}</strong><small>New frontend version${event.batch ? " · " + escape(event.batch) : ""}</small></div><time>${ago(event.detected_at)}</time></a>`,
+          `<a class="feed-item" href="/company/${encodeURIComponent(event.slug)}"><div><strong>${escape(event.name)}</strong><small>Observed change${event.batch ? " · " + escape(event.batch) : ""}</small></div><time>${ago(event.detected_at)}</time></a>`,
       )
       .join("");
+  const choices = [
+    { value: "", label: "All websites" },
+    ...result.batches.map((batch) => ({
+      value: batch.batch,
+      label: `${batch.batch} (${batch.count})`,
+    })),
+  ];
   const batchSelect = select("#batch");
-  const previous = batchSelect.value;
-  batchSelect.innerHTML =
-    '<option value="">All websites</option>' +
-    result.batches
-      .map(
-        (batch) =>
-          `<option value="${escape(batch.batch)}">${escape(batch.batch)} (${batch.count})</option>`,
-      )
-      .join("");
-  batchSelect.value = previous;
+  batchSelect.innerHTML = choices
+    .map(
+      (choice) =>
+        `<option value="${escape(choice.value)}">${escape(choice.label)}</option>`,
+    )
+    .join("");
+  batchSelect.value = state.batch;
 }
 async function loadCompanies() {
   const request = ++companiesRequest;
@@ -70,21 +86,22 @@ async function loadCompanies() {
     ? result.companies
         .map((company, index) => {
           const stale =
+            !result.preview &&
             company.status === "watching" &&
             company.last_success < Date.now() / 1000 - 900;
           const status = stale ? "stale" : company.status;
           const label =
             {
-              watching: "Watching",
-              error: "Retrying",
+              watching: result.preview ? "Snapshot" : "Watching",
+              error: result.preview ? "Fetch error" : "Retrying",
               unsupported: "Unobservable",
               queued: "Queued",
               stale: "Delayed",
             }[status] || status;
-          return `<tr class="company-row"><td class="rank">${state.page * 50 + index + 1}</td><td><div class="company-name"><div><a href="/company/${encodeURIComponent(company.id)}">${escape(company.name)}</a><small>${escape(host(company.url))}</small></div></div></td><td><span class="batch-tag${company.batch ? "" : " community-tag"}">${escape(company.batch || "COMMUNITY")}</span></td><td class="numeric release-count">${company.baseline_at ? number(company.releases) : "—"}</td><td class="numeric muted">${company.baseline_at ? number(company.weekend) : "—"}</td><td class="last-ship" title="${escape(date(company.last_release))}">${company.last_release ? ago(company.last_release) : company.baseline_at ? "No release yet" : "Waiting for data"}</td><td><span class="monitor-state ${escape(status)}" title="${escape(company.error || "Last successful check: " + date(company.last_success))}">${label}</span></td></tr>`;
+          return `<tr class="company-row"><td class="rank">${state.page * 50 + index + 1}</td><td><div class="company-name">${favicon(company.url)}<div><a href="/company/${encodeURIComponent(company.slug)}">${escape(company.name)}</a><small>${escape(host(company.url))}</small></div></div></td><td><span class="batch-tag${company.batch ? "" : " community-tag"}">${escape(company.batch || "COMMUNITY")}</span></td><td class="numeric release-count">${company.baseline_at ? number(company.releases) : "—"}</td><td class="last-ship" title="${escape(date(company.last_release))}">${company.last_release ? ago(company.last_release) : company.baseline_at ? "No release yet" : "Waiting for data"}</td><td><span class="monitor-state ${escape(status)}" title="${escape(company.error || (result.preview ? "Preview polling is paused. Last recorded success: " : "Last successful check: ") + date(company.last_success))}">${label}</span></td></tr>`;
         })
         .join("")
-    : '<tr><td colspan="7" class="table-empty">No websites match this search. Try another name or collection.</td></tr>';
+    : '<tr><td colspan="6" class="table-empty">No websites match this search. Try another name or collection.</td></tr>';
   select("#results-label").textContent = result.total
     ? `${number(state.page * 50 + 1)}–${number(Math.min((state.page + 1) * 50, result.total))} of ${number(result.total)} sites · ${state.days}-day window`
     : "No results";
@@ -93,55 +110,40 @@ async function loadCompanies() {
 }
 async function refresh() {
   try {
-    await Promise.all([loadSummary(), loadCompanies()]);
+    await Promise.all([
+      loadSummary(),
+      loadCompanies(),
+    ]);
     select("#connection-error").hidden = true;
   } catch {
     select("#connection-error").hidden = false;
   }
 }
-function historyChart(history) {
-  const max = Math.max(1, ...history.days.map((day) => day.releases ?? 0));
-  const bars = history.days
-    .map((day, index) => {
-      const position = 45 + index * 27;
-      if (day.releases === null)
-        return `<text x="${position + 8}" y="205" class="chart-missing"><title>${escape(day.day)}: no successful observation</title>·</text>`;
-      const height = (day.releases / max) * 150;
-      return `<rect x="${position}" y="${190 - height}" width="15" height="${Math.max(2, height)}" class="chart-bar"><title>${escape(day.day)}: ${day.releases} observed releases${day.complete ? "" : " (partial day)"}</title></rect>`;
-    })
-    .join("");
-  return `<figure class="release-chart"><svg viewBox="0 0 900 240" role="img" aria-label="Daily observed frontend releases over the last 30 UTC days. Dots indicate no observations; today is partial."><text x="12" y="43">${max}</text><text x="12" y="194">0</text><line x1="40" y1="190" x2="860" y2="190" class="chart-axis"/>${bars}<text x="45" y="230">${escape(history.days[0].day.slice(5))}</text><text x="430" y="230">${escape(history.days[14].day.slice(5))}</text><text x="800" y="230">Today</text></svg><figcaption>Daily observed releases · UTC · dots mean no observations, not zero releases. Today is partial.</figcaption><details><summary>Daily data</summary><table><thead><tr><th>Date (UTC)</th><th>Observed releases</th></tr></thead><tbody>${history.days.map((day) => `<tr><td>${escape(day.day)}</td><td>${day.releases === null ? "Not observed" : number(day.releases)}${day.releases !== null && !day.complete ? " (partial day)" : ""}</td></tr>`).join("")}</tbody></table></details></figure>`;
-}
 async function showCompany(id) {
   select("#index-page").hidden = true;
   select("#company-page").hidden = false;
   try {
-    const result = await api("/api/company/" + encodeURIComponent(id));
+    const [result, { mountChart }] = await Promise.all([
+      api("/api/company/" + encodeURIComponent(id)),
+      import("/chart.js?v=content-3"),
+    ]);
     const company = result.company;
     const history = result.history;
-    const discovery = result.discovery;
-    const review = discovery?.review ? JSON.parse(discovery.review) : null;
-    const monitoringNote = discovery?.error
-      ? "URL review could not finish. The existing website remains monitored."
-      : review && !review.recommended.length
-        ? "No product URL was recommended. The existing website remains monitored."
-        : ["queued", "running"].includes(discovery?.status)
-          ? "URL review is in progress. The current website remains monitored."
-          : "Watching these public URLs.";
     document.title = company.name + " — Shipwatch";
     const rate =
       history.releasesPerDay === null
-        ? "Still getting to know this website."
+        ? ""
         : `${history.releasesPerDay.toLocaleString(undefined, { maximumFractionDigits: 1 })} releases per observed day.`;
     select("#company-detail").innerHTML = `
-      <header class="company-heading"><p class="eyebrow">WEBSITE OBSERVATIONS</p><h1>${escape(company.name)}</h1><div class="company-links"><a href="${escape(company.url)}" target="_blank" rel="noopener">${escape(host(company.url))}</a><button class="text-button" id="copy-company">Copy page link</button><span id="share-status" role="status"></span></div><p>${escape(company.description)}</p></header>
-      <section class="company-history"><h2>Release history</h2><p class="metric-sentence">${escape(rate)}</p><p class="history-context">${number(history.total)} releases observed over the past 30 days.</p><details class="metric-method"><summary>How this rate works</summary><p>The rate uses ${number(history.comparableReleases)} releases across ${number(history.observedDays)} completed UTC days with successful checks. Today and a partial first day are excluded. Days without checks are missing, not zero. A checked day does not mean uninterrupted coverage.</p></details>${historyChart(history)}</section>
-      <section class="observation-notes"><h2>What we can see</h2><dl><dt>First observed</dt><dd>${escape(date(company.baseline_at))}</dd><dt>Last successful check</dt><dd>${escape(date(company.last_success))}</dd><dt>Successful checks</dt><dd>${number(company.successes)} of ${number(company.checks)} attempts</dd></dl><p>${escape(company.error || "Public frontend changes, checked every five minutes.")}</p><h3>Monitored URLs</h3><p class="fine-print">${escape(monitoringNote)}</p>${result.targets.map((target) => `<p class="monitor-target"><a href="${escape(target.url)}" target="_blank" rel="noopener">${escape(target.url)}</a><span>${escape(target.status)} · last success ${escape(ago(target.last_success))}</span></p>`).join("")}</section>
-      <section class="release-log"><h2>Observation log</h2>${result.releases.length ? result.releases.map((release) => `<article class="detail-event"><time>${escape(date(release.detected_at))}</time><p>Changed between ${escape(date(release.previous_at))} and ${escape(date(release.detected_at))}. Confirmed ${escape(date(release.confirmed_at))}.</p><details><summary>Release evidence</summary><pre>${escape(JSON.stringify(JSON.parse(release.evidence), null, 2))}</pre></details></article>`).join("") : "<p>No releases observed yet. Changes will appear here as we see them.</p>"}<p class="fine-print">Latest 100 events. The chart counts all releases in its date range, not just this log. These are frontend signals, not commits, backend deploys, or working hours.</p></section>`;
+      <header class="company-heading"><p class="eyebrow">WEBSITE OBSERVATIONS</p><h1>${favicon(company.url)}${escape(company.name)}</h1><div class="company-links"><a href="${escape(company.url)}" target="_blank" rel="noopener">${escape(host(company.url))}</a><button class="text-button" id="copy-company">Copy page link</button><span id="share-status" role="status"></span></div><p>${escape(company.description)}</p></header>
+      <section class="company-history"><h2>Release history</h2><p class="metric-sentence">${escape(rate)}</p><p class="history-context">${number(history.total)} releases observed over the past 30 days.</p><details class="metric-method" ${rate ? "" : "hidden"}><summary>How this rate works</summary><p>The rate uses ${number(history.comparableReleases)} releases across ${number(history.observedDays)} completed UTC days with successful checks. Today and a partial first day are excluded. Days without checks are missing, not zero. A checked day does not mean uninterrupted coverage.</p></details><div class="chart-controls"><div class="chart-toggle" role="group" aria-label="Time range"><button data-chart-days="0.5" aria-pressed="true">12 hours</button><button data-chart-days="7" aria-pressed="false">7 days</button><button data-chart-days="30" aria-pressed="false">30 days</button></div></div><div id="release-chart" role="img" aria-label="Interactive release chart"></div><p id="chart-readout" class="chart-readout" aria-live="polite"></p><details class="daily-data"><summary>Release data</summary>${company.legacy_releases ? '<p class="fine-print">Older observations are included only when their content can be reverified.</p>' : ""}<div class="data-scroll"><table><thead><tr><th>Period starts</th><th>Releases</th><th></th></tr></thead><tbody id="chart-data"></tbody></table></div></details></section>
+      <section class="observation-notes"><h2>Tracking details</h2><dl><dt>Watching since</dt><dd>${escape(date(company.baseline_at))}</dd><dt>Last checked</dt><dd>${escape(date(company.last_success))}</dd><dt>Successful checks</dt><dd>${number(company.successes)} / ${number(company.checks)}</dd></dl>${company.error ? `<p>${escape(company.error)}</p>` : ""}${result.targets.map((target) => `<p class="monitor-target"><a href="${escape(target.url)}" target="_blank" rel="noopener">${escape(host(target.url))}${escape(new URL(target.url).pathname === "/" ? "" : new URL(target.url).pathname)}</a><span>${result.preview ? "Snapshot" : escape(target.status)} · checked ${escape(date(target.last_success))}</span></p>`).join("")}</section>
+      <section class="release-log"><h2>Releases</h2>${result.releases.length ? result.releases.map((release) => `<article class="detail-event"><details><summary><span>${escape(release.summary)}</span>${releaseTimestamp(release.detected_at)}</summary><dl class="event-details"><dt>Previous check</dt><dd>${escape(date(release.previous_at))}</dd><dt>Detected</dt><dd>${escape(date(release.detected_at))}</dd><dt>Confirmed</dt><dd>${escape(date(release.confirmed_at))}</dd></dl><details><summary>Fingerprint evidence</summary><pre>${escape(JSON.stringify(JSON.parse(release.evidence), null, 2))}</pre></details></details></article>`).join("") : "<p>No releases observed yet.</p>"}${result.releases.length >= 100 ? '<p class="fine-print">Latest 100 releases. The chart includes all releases in the selected range.</p>' : ""}</section>`;
+    mountChart(result);
     select("#copy-company").addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(
-          location.origin + "/company/" + encodeURIComponent(id),
+          location.origin + "/company/" + encodeURIComponent(company.slug),
         );
         select("#share-status").textContent = "Link copied";
       } catch {
@@ -159,16 +161,12 @@ select("#add-button").addEventListener("click", async () => {
     const options = await api("/api/discovery-options");
     if (!options.available)
       select("#submission-message").textContent =
-        "AI discovery is not configured on this server yet.";
+        "Website discovery is unavailable right now.";
   } catch {
     select("#submission-message").textContent =
       "Could not load discovery settings. Try again shortly.";
   }
 });
-for (const id of ["#method-button", "#method-inline", "#hero-method"])
-  select(id).addEventListener("click", () =>
-    select("#method-dialog").showModal(),
-  );
 document.addEventListener("click", (event) => {
   const close = event.target.closest("[data-close]");
   if (close) document.getElementById(close.dataset.close).close();
@@ -238,7 +236,7 @@ select("#add-form").addEventListener("submit", async (event) => {
   button.disabled = true;
   button.textContent = discoveryDraft
     ? "Starting monitoring…"
-    : "Discovering and reviewing with Luna…";
+    : "Finding subdomains…";
   select("#submission-message").textContent = "";
   try {
     const fields = Object.fromEntries(new FormData(event.target));
@@ -264,11 +262,11 @@ select("#add-form").addEventListener("submit", async (event) => {
       select("#discovery-inputs").hidden = true;
       select("#discovery-review").hidden = false;
       select("#discovery-summary").textContent =
-        `Inspected ${result.review.candidates.length} of ${result.review.discovered} discovered domains. Luna suggested ${result.review.recommended.length}. Check or uncheck any inspectable URL; select at least one.`;
+        `Reviewed ${result.review.candidates.length} websites. ${result.review.recommended.length} suggested. Select at least one to monitor.`;
       select("#discovery-candidates").innerHTML = result.review.candidates
         .map(
           (candidate) =>
-            `<label class="candidate-choice"><input class="candidate-checkbox" type="checkbox" value="${escape(candidate.url)}" ${result.review.recommended.includes(candidate.url) ? "checked" : ""} ${candidate.error ? "disabled" : ""}><span><strong>${escape(candidate.title || host(candidate.url))}</strong><small>${escape(candidate.url)}</small><small>${escape(candidate.error || (candidate.probability === null ? "No decision" : `Luna: ${Math.round(candidate.probability * 100)}% yes${candidate.probability >= 0.7 ? " · recommended" : " · not recommended"}`))}</small></span></label>`,
+            `<label class="candidate-choice"><input class="candidate-checkbox" type="checkbox" value="${escape(candidate.url)}" ${result.review.recommended.includes(candidate.url) ? "checked" : ""} ${candidate.error ? "disabled" : ""}><span><strong>${escape(candidate.title || host(candidate.url))}</strong><small>${escape(candidate.url)}</small>${candidate.error ? `<small>${escape(candidate.error)}</small>` : result.review.recommended.includes(candidate.url) ? "<small>Suggested</small>" : ""}</span></label>`,
         )
         .join("");
       updateSelection();
@@ -282,7 +280,7 @@ select("#add-form").addEventListener("submit", async (event) => {
       select("#add-dialog").close();
       select("#discovery-back").click();
       event.target.reset();
-      location.href = "/company/" + encodeURIComponent(result.company.id);
+      location.href = "/company/" + encodeURIComponent(result.company.slug);
     }, 900);
   } catch (error) {
     select("#submission-message").textContent = error.message;
@@ -296,9 +294,21 @@ select("#add-form").addEventListener("submit", async (event) => {
 });
 const companyPath = location.pathname.match(/^\/company\/([a-zA-Z0-9-]+)$/);
 if (companyPath) showCompany(companyPath[1]);
-else {
+else if (location.pathname !== "/how-it-works") {
   refresh();
   setInterval(() => {
     if (!document.hidden) refresh();
   }, 30000);
 }
+
+document.addEventListener(
+  "error",
+  (event) => {
+    if (
+      event.target instanceof HTMLImageElement &&
+      event.target.classList.contains("favicon")
+    )
+      event.target.hidden = true;
+  },
+  true,
+);

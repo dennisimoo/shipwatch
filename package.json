@@ -7,6 +7,7 @@
     "start": "bun src/server.ts",
     "dev": "bun --watch src/server.ts",
     "import:yc": "bun src/import-yc.ts",
+    "recheck:history": "bun src/recheck-history.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
@@ -15,13 +16,16 @@
     "typescript": "latest"
   },
   "dependencies": {
+    "@sindresorhus/slugify": "^3.0.1",
     "cheerio": "^1.2.0",
+    "diff": "9.0.0",
     "entities": "^9.0.0",
     "ipaddr.js": "^2.5.0",
     "openai": "^7.45.1",
     "p-limit": "^7.3.3",
     "rate-limiter-flexible": "^11.2.3",
     "robots-parser": "^3.0.1",
-    "tldts": "^7.4.19"
+    "tldts": "^7.4.19",
+    "uplot": "^1.6.32"
   }
 }

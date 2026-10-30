@@ -69,6 +69,32 @@ test("rollback to initial baseline must not count as a new release", async () =>
   expect(count()).toBe(1);
 });
 
+test("content tracking rebases legacy fingerprints without manufacturing a release", () => {
+  recordSnapshot(company(), { fingerprint: "legacy-deploy", assets: {}, evidence: "{}" }, 1000);
+  recordSnapshot(company(), { fingerprint: "content-v3:first", assets: {}, evidence: "{}" }, 2000);
+  expect(count()).toBe(0);
+  expect(db.query("SELECT baseline_at,content_baseline_at FROM targets WHERE id='test'").get())
+    .toEqual({ baseline_at: 1000, content_baseline_at: 2000 });
+  recordSnapshot(company(), { fingerprint: "content-v3:changed", assets: {}, evidence: "{}" }, 2300);
+  recordSnapshot(company(), { fingerprint: "content-v3:changed", assets: {}, evidence: "{}" }, 2360);
+  expect(db.query("SELECT COUNT(*) AS count FROM bundle_releases").get()).toEqual({ count: 1 });
+});
+
+test("retain confirmed versions but count application changes once per five-minute interval", () => {
+  recordSnapshot(company(), { fingerprint: "content-v3:first", assets: {}, evidence: "{}" }, 1000);
+  for (const [fingerprint, timestamp] of [["content-v3:second", 1201], ["content-v3:third", 1301]] as const) {
+    recordSnapshot(company(), { fingerprint, assets: {}, evidence: "{}" }, timestamp);
+    recordSnapshot(company(), { fingerprint, assets: {}, evidence: "{}" }, timestamp + 60);
+  }
+  expect(count()).toBe(2);
+  db.exec("UPDATE change_analysis SET classification='application'");
+  expect(db.query("SELECT COUNT(*) AS count FROM application_releases").get()).toEqual({ count: 1 });
+  expect(db.query("SELECT COUNT(*) AS count FROM seen_versions").get()).toEqual({ count: 3 });
+  recordSnapshot(company(), { fingerprint: "content-v3:fourth", assets: {}, evidence: "{}" }, 1501);
+  recordSnapshot(company(), { fingerprint: "content-v3:fourth", assets: {}, evidence: "{}" }, 1561);
+  expect(count()).toBe(3);
+});
+
 test("failed checks never change the baseline or confirm a pending release", async () => {
   await checkCompany(company());
   currentFingerprint = "second";

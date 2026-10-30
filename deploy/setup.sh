@@ -5,12 +5,18 @@ set -euo pipefail
 test "$(uname -m)" = aarch64
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq caddy unzip curl build-essential pkg-config
+apt-get install -y -qq caddy unzip curl build-essential pkg-config golang-go
+GOBIN=/usr/local/bin go install github.com/BishopFox/jsluice/cmd/jsluice@v0.0.0-20240110145140-0ddfab153e06
 installation_directory=$(mktemp -d)
 trap 'rm -rf "$installation_directory"' EXIT
 curl --fail --location https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-aarch64.zip -o "$installation_directory/bun.zip"
 unzip -q "$installation_directory/bun.zip" -d "$installation_directory"
 install "$installation_directory/bun-linux-aarch64/bun" /usr/local/bin/bun
+curl --fail --location https://github.com/projectdiscovery/subfinder/releases/download/v2.17.0/subfinder_2.17.0_linux_arm64.zip -o "$installation_directory/subfinder_2.17.0_linux_arm64.zip"
+curl --fail --location https://github.com/projectdiscovery/subfinder/releases/download/v2.17.0/subfinder_2.17.0_checksums.txt -o "$installation_directory/subfinder-checksums.txt"
+(cd "$installation_directory" && grep ' subfinder_2.17.0_linux_arm64.zip$' subfinder-checksums.txt | sha256sum -c -)
+unzip -q "$installation_directory/subfinder_2.17.0_linux_arm64.zip" subfinder -d "$installation_directory"
+install "$installation_directory/subfinder" /usr/local/bin/subfinder
 curl --fail --location https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o "$installation_directory/aws.zip"
 unzip -q "$installation_directory/aws.zip" -d "$installation_directory"
 "$installation_directory/aws/install" --update

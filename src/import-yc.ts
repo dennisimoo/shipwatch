@@ -1,4 +1,4 @@
-import { db, now } from "./db";
+import { db, now, ensureCompanySlug } from "./db";
 import { normalizeUrl } from "./network";
 
 interface YCCompany {
@@ -63,6 +63,7 @@ export function syncDirectory(companies: YCCompany[], year: string) {
         1,
         now(),
       );
+      ensureCompanySlug(`yc-${company.id}`, company.name);
       db.query(
         "INSERT INTO targets(id,company_id,url,next_check) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM targets WHERE company_id=?)",
       ).run(

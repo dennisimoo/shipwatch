@@ -1,6 +1,8 @@
 import { db, now, recordSnapshot, recordFailure, type Target } from "./db";
 import { snapshot } from "./detect";
+import type { Asset } from "./detect";
 import { fetchPublic, robotsAllowed } from "./network";
+import { saveBody, analyzeNext } from "./analysis";
 
 const inflight = new Set<string>();
 const hostInflight = new Set<string>();
@@ -51,10 +53,17 @@ export async function checkCompany(company: Target) {
   try {
     if (!(await allowed(company.url)))
       throw new Error("Monitoring disallowed by robots.txt");
+    const previous = JSON.parse(company.assets) as Record<string, Asset>;
+    for (const asset of Object.values(previous))
+      if (!db.query("SELECT 1 FROM bundle_bodies WHERE hash=?").get(asset.hash)) {
+        delete asset.etag;
+        delete asset.modified;
+      }
     const result = await snapshot(
       company.url,
-      JSON.parse(company.assets),
+      previous,
       allowed,
+      saveBody,
     );
     bytes = result.bytes;
     recordSnapshot(company, result, now());
@@ -75,7 +84,13 @@ export async function checkCompany(company: Target) {
 }
 
 export function startPolling() {
+  let analyzing = false;
   const tick = () => {
+    if (!analyzing && process.env.OPENAI_API_KEY) {
+      analyzing = true;
+      void analyzeNext().catch((error) => console.error("analysis", error.message))
+        .finally(() => { analyzing = false; });
+    }
     if (inflight.size >= concurrency) return;
     const due = db
       .query<Target, [number]>(

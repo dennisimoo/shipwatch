@@ -3,12 +3,32 @@ import http from "node:http";
 import https from "node:https";
 import ipaddr from "ipaddr.js";
 import robotsParser from "robots-parser";
+import { getDomain } from "tldts";
+
+export function sameSite(left: string, right: string): boolean {
+  const leftHost = new URL(left).hostname;
+  const rightHost = new URL(right).hostname;
+  const domain = getDomain(leftHost, { allowPrivateDomains: true });
+  return leftHost === rightHost || (domain !== null && domain === getDomain(rightHost, { allowPrivateDomains: true }));
+}
+
+export function apiSchema(source: string): boolean {
+  try {
+    const document = JSON.parse(source);
+    return document !== null && typeof document === "object" &&
+      (typeof document.openapi === "string" || document.swagger === "2.0") &&
+      document.paths !== null && typeof document.paths === "object" && !Array.isArray(document.paths);
+  } catch {
+    return false;
+  }
+}
 
 export function publicAddress(address: string): boolean {
   return ipaddr.isValid(address) && ipaddr.parse(address).range() === "unicast";
 }
 
 export function normalizeUrl(input: string): URL {
+  input = input.trim();
   const target = new URL(input.includes("://") ? input : `https://${input}`);
   if (
     !["https:", "http:"].includes(target.protocol) ||

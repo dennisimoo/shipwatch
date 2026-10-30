@@ -1,4 +1,4 @@
-import { db, now } from "./db";
+import { db, now, ensureCompanySlug } from "./db";
 import { encodeHTML } from "entities";
 import {
   releaseHistory,
@@ -50,50 +50,57 @@ function leaderboard(url: URL) {
   const parameters = [search, pattern, pattern, batch, batch];
   const companies = db
     .query(
-      `SELECT c.id,c.name,c.url,c.batch,c.description,c.source,c.yc_url,c.status,c.error,
-    c.created_at,c.baseline_at,c.last_check,c.last_success,c.checks,c.successes,
+      `SELECT c.id,c.slug,c.name,c.url,c.batch,c.description,c.source,c.yc_url,c.status,c.error,
+    c.created_at,c.content_baseline_at AS baseline_at,c.last_check,c.last_success,c.checks,c.successes,c.target_count,
     COUNT(r.id) AS releases,MAX(r.detected_at) AS last_release,
     SUM(CASE WHEN strftime('%w',r.detected_at,'unixepoch') IN ('0','6') THEN 1 ELSE 0 END) AS weekend,
     COUNT(DISTINCT strftime('%Y-%m-%d',r.detected_at,'unixepoch')) AS active_days
-    FROM company_summary c LEFT JOIN releases r ON r.company_id=c.id AND r.detected_at>=?
+    FROM company_summary c LEFT JOIN application_releases r ON r.company_id=c.id AND r.detected_at>=?
     ${condition} GROUP BY c.id ORDER BY ${order},c.name COLLATE NOCASE LIMIT 50 OFFSET ?`,
     )
     .all(since, ...parameters, page * 50);
   const total = db
-    .query(`SELECT COUNT(*) AS total FROM company_summary c ${condition}`)
+    .query(`SELECT COUNT(*) AS total FROM companies c ${condition}`)
     .get(...parameters);
-  return { companies, ...(total as object), page, days, timezone: "UTC" };
+  return {
+    companies,
+    ...(total as object),
+    page,
+    days,
+    timezone: "UTC",
+    preview: process.env.POLL_ENABLED === "0",
+  };
 }
 
 function summary() {
   const counts = db
     .query(
       `SELECT COUNT(*) AS companies,SUM(enabled) AS enabled,
-    SUM(CASE WHEN enabled=1 AND baseline_at IS NOT NULL THEN 1 ELSE 0 END) AS baselined,
+    SUM(CASE WHEN enabled=1 AND content_baseline_at IS NOT NULL THEN 1 ELSE 0 END) AS baselined,
     SUM(CASE WHEN enabled=1 AND last_success>=? THEN 1 ELSE 0 END) AS fresh,
     SUM(CASE WHEN enabled=1 AND status='error' THEN 1 ELSE 0 END) AS errors,
     SUM(CASE WHEN enabled=1 AND status='unsupported' THEN 1 ELSE 0 END) AS unsupported,
-    MIN(baseline_at) AS started_at FROM company_summary`,
+    MIN(content_baseline_at) AS started_at FROM company_summary`,
     )
     .get(now() - 900) as Record<string, number>;
   const releases = db
     .query(
       `SELECT COUNT(*) AS releases,
     SUM(CASE WHEN strftime('%w',detected_at,'unixepoch') IN ('0','6') THEN 1 ELSE 0 END) AS weekend
-    FROM releases WHERE detected_at>=?`,
+    FROM application_releases WHERE detected_at>=?`,
     )
     .get(now() - 30 * 86400);
   const heatmap = db
     .query(
       `SELECT CAST(strftime('%w',detected_at,'unixepoch') AS INTEGER) AS day,
     CAST(strftime('%H',detected_at,'unixepoch') AS INTEGER) AS hour,COUNT(*) AS count
-    FROM releases WHERE detected_at>=? GROUP BY day,hour`,
+    FROM application_releases WHERE detected_at>=? GROUP BY day,hour`,
     )
     .all(now() - 30 * 86400);
   const activity = db
     .query(
-      `SELECT r.id,r.company_id,r.detected_at,r.previous_at,c.name,c.batch
-    FROM releases r JOIN companies c ON c.id=r.company_id ORDER BY r.detected_at DESC LIMIT 12`,
+      `SELECT r.id,r.company_id,r.detected_at,r.previous_at,c.name,c.slug,c.batch
+    FROM application_releases r JOIN companies c ON c.id=r.company_id ORDER BY r.detected_at DESC LIMIT 12`,
     )
     .all();
   const batches = db
@@ -119,6 +126,17 @@ function summary() {
     heatmap,
     activity,
     batches,
+    preview: process.env.POLL_ENABLED === "0",
+    observed_at: (
+      db.query("SELECT MAX(last_check) AS at FROM targets").get() as {
+        at: number | null;
+      }
+    ).at,
+    monitoring: db
+      .query(
+        `SELECT state,COUNT(*) AS count FROM (SELECT CASE WHEN status IN (\'error\',\'unsupported\',\'queued\') THEN status WHEN last_success>=? THEN \'watching\' ELSE \'stale\' END AS state FROM company_summary WHERE enabled=1) GROUP BY state`,
+      )
+      .all(now() - 900),
     timezone: "UTC",
     interval_seconds: 300,
   };
@@ -175,20 +193,24 @@ const server = Bun.serve({
         request.method === "GET" &&
         url.pathname.startsWith("/api/company/")
       ) {
-        const id = decodeURIComponent(
+        const identifier = decodeURIComponent(
           url.pathname.slice("/api/company/".length),
         );
         const company = db
           .query(
-            `SELECT id,name,url,batch,description,yc_url,status,error,
-            (SELECT MIN(t.baseline_at) FROM targets t WHERE t.company_id=c.id) AS baseline_at,
-            last_check,last_success,checks,successes FROM company_summary c WHERE id=?`,
+            `SELECT id,slug,name,url,batch,description,yc_url,status,error,
+            (SELECT COUNT(*) FROM releases r WHERE r.company_id=c.id AND r.fingerprint NOT LIKE 'content-v2:%') AS legacy_releases,
+            (SELECT MIN(t.content_baseline_at) FROM targets t WHERE t.company_id=c.id) AS baseline_at,
+            last_check,last_success,checks,successes FROM company_summary c WHERE slug=?`,
           )
-          .get(id);
-        if (!company) return json({ error: "Company not found" }, 404);
+          .get(identifier);
+        if (!company) return json({ error: "Website not found" }, 404);
+        const id = (company as { id: string }).id;
         const releases = db
           .query(
-            "SELECT id,detected_at,previous_at,confirmed_at,evidence,url FROM releases WHERE company_id=? ORDER BY detected_at DESC LIMIT 100",
+            `SELECT r.id,r.detected_at,r.previous_at,r.confirmed_at,r.evidence,r.url,a.classification,a.summary
+              FROM application_releases r JOIN change_analysis a ON a.release_id=r.id
+              WHERE r.company_id=? ORDER BY r.detected_at DESC LIMIT 100`,
           )
           .all(id);
         const coverage = db
@@ -210,7 +232,7 @@ const server = Bun.serve({
           .baseline_at;
         const dailyReleases = db
           .query(
-            "SELECT strftime('%Y-%m-%d',detected_at,'unixepoch') AS day,COUNT(*) AS releases FROM releases WHERE company_id=? AND detected_at>=? GROUP BY day",
+            "SELECT strftime('%Y-%m-%d',detected_at,'unixepoch') AS day,COUNT(*) AS releases FROM application_releases WHERE company_id=? AND detected_at>=? GROUP BY day",
           )
           .all(
             id,
@@ -229,6 +251,13 @@ const server = Bun.serve({
           targets,
           discovery,
           history,
+          events: db
+            .query(
+              "SELECT detected_at FROM application_releases WHERE company_id=? AND detected_at>=? ORDER BY detected_at",
+            )
+            .all(id, now() - 32 * 86400),
+          observed_at: now(),
+          preview: process.env.POLL_ENABLED === "0",
         });
       }
       if (
@@ -281,7 +310,7 @@ const server = Bun.serve({
           const review = JSON.parse(draft.payload) as Review;
           const urls = selectedUrls(review, input.selected);
           const existing = db
-            .query("SELECT id FROM companies WHERE url=?")
+            .query("SELECT id,slug FROM companies WHERE url=?")
             .get(review.url);
           if (existing) return json({ company: existing, existing: true });
           const id = `site-${hash(review.url).slice(0, 16)}`;
@@ -310,9 +339,10 @@ const server = Bun.serve({
               input.token as string,
             );
           })();
+          const slug = ensureCompanySlug(id, review.name);
           cache.clear();
           return json(
-            { company: { id, name: review.name }, existing: false },
+            { company: { id, slug, name: review.name }, existing: false },
             201,
           );
         }
@@ -337,7 +367,7 @@ const server = Bun.serve({
             );
           const target = normalizeUrl(input.url);
           const existing = db
-            .query("SELECT id FROM companies WHERE url=?")
+            .query("SELECT id,slug FROM companies WHERE url=?")
             .get(target.href);
           if (existing) return json({ company: existing, existing: true });
           const name =
@@ -360,41 +390,57 @@ const server = Bun.serve({
       const assets: Record<string, string> = {
         "/": "index.html",
         "/app.js": "app.js",
+        "/chart.js": "chart.js",
+        "/chart-data.js": "chart-data.js",
+        "/uplot.js": "../node_modules/uplot/dist/uPlot.esm.js",
+        "/uplot.css": "../node_modules/uplot/dist/uPlot.min.css",
         "/styles.css": "styles.css",
         "/favicon.svg": "favicon.svg",
         "/source-serif-4.woff2": "source-serif-4.woff2",
         "/chakra-petch-500.woff2": "chakra-petch-500.woff2",
       };
+      const methodPage = url.pathname === "/how-it-works";
+      if (url.pathname === "/index")
+        return Response.redirect(new URL("/#leaderboard", url), 302);
       const companyPage = /^\/company\/[a-zA-Z0-9-]+$/.test(url.pathname);
       const pageCompany = companyPage
         ? (db
-            .query("SELECT name FROM companies WHERE id=?")
-            .get(url.pathname.slice(9)) as { name: string } | null)
+            .query("SELECT name,slug FROM companies WHERE slug=?")
+            .get(url.pathname.slice(9)) as {
+            name: string;
+            slug: string;
+          } | null)
         : null;
       if (companyPage && !pageCompany)
         return json({ error: "Website not found" }, 404);
-      const asset = companyPage ? "index.html" : assets[url.pathname];
+      const asset =
+        companyPage || methodPage
+          ? "index.html"
+          : assets[url.pathname];
       if (!asset) return json({ error: "Not found" }, 404);
       return new Response(
-        companyPage
+        companyPage || methodPage
           ? (await Bun.file(new URL(asset, publicDirectory)).text())
-              .replace("<body>", '<body data-view="company">')
+              .replace(
+                "<body>",
+                `<body data-view="${methodPage ? "method" : "company"}">`,
+              )
               .replace(
                 /<title>[^<]*<\/title>/,
                 () =>
-                  `<title>${encodeHTML(pageCompany!.name)} — Shipwatch</title><meta property="og:title" content="${encodeHTML(pageCompany!.name)} — Shipwatch" />`,
+                  `<title>${methodPage ? "How it works" : encodeHTML(pageCompany!.name)} — Shipwatch</title><meta property="og:title" content="${methodPage ? "How it works" : encodeHTML(pageCompany!.name)} — Shipwatch" />`,
               )
           : Bun.file(new URL(asset, publicDirectory)),
         {
           headers: {
             "Cache-Control": "public, max-age=60",
-            ...(companyPage
+            ...(companyPage || methodPage
               ? { "Content-Type": "text/html; charset=utf-8" }
               : {}),
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "strict-origin-when-cross-origin",
             "Content-Security-Policy":
-              "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+              "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' https://www.google.com https://t0.gstatic.com https://t1.gstatic.com https://t2.gstatic.com https://t3.gstatic.com; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
           },
         },
       );
@@ -402,7 +448,7 @@ const server = Bun.serve({
       if (error instanceof OpenAI.APIError)
         return json(
           {
-            error: `Luna discovery failed (HTTP ${error.status || "unknown"}). Please try again later.`,
+            error: `Website review failed (HTTP ${error.status || "unknown"}). Please try again later.`,
           },
           502,
         );

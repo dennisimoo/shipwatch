@@ -9,5 +9,9 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: go install github.com/BishopFox/jsluice/cmd/jsluice@v0.0.0-20240110145140-0ddfab153e06
       - run: bun test
       - run: bun run typecheck

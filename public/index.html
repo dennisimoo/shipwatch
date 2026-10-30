@@ -6,19 +6,19 @@
     <meta name="theme-color" content="#ffffff" />
     <meta
       name="description"
-      content="A public pulse on who's shipping. Track observed frontend releases across public websites, every five minutes."
+      content="A public pulse on who's shipping. Track observed website and public API changes, every five minutes."
     />
     <title>Shipwatch — Who's shipping?</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css" />
-    <script src="/app.js" defer></script>
+    <link rel="stylesheet" href="/uplot.css" />
+    <link rel="stylesheet" href="/styles.css?v=dates-1" />
+    <script src="/app.js?v=luna-4" type="module"></script>
   </head>
   <body>
     <header class="topbar">
       <a class="wordmark" href="/" aria-label="Shipwatch home">Shipwatch</a>
       <nav aria-label="Main navigation">
-        <a href="/#leaderboard">Index</a
-        ><button class="text-button" id="method-button">How it works</button
+        <a href="/#leaderboard">Index</a><a href="/how-it-works">How it works</a
         ><a
           href="https://github.com/dennisimoo/shipwatch"
           target="_blank"
@@ -41,112 +41,106 @@
               history, find their rhythm, and share what you notice.
             </p>
             <div class="hero-foot">
-              <a class="button button-dark" href="#leaderboard"
-                >Explore the index</a
-              >
-              <button class="text-button" id="hero-method">
-                How we observe
-              </button>
+              <a class="button button-dark" href="#leaderboard">Explore the index</a>
+              <a href="/how-it-works">How it works</a>
             </div>
           </div>
         </section>
-        <p class="index-note" id="coverage-note">
-          Establishing what we can observe…
-        </p>
-        <section class="leaderboard-section" id="leaderboard">
-          <div class="section-intro">
-            <div>
-              <h2>The index</h2>
-            </div>
-            <div class="window-switch" aria-label="Ranking period">
-              <button data-days="7">7 days</button
-              ><button data-days="30" class="selected">30 days</button>
-            </div>
-          </div>
-          <div class="table-card">
-            <div class="filters">
-              <label class="search-box"
-                ><input
-                  id="search"
-                  type="search"
-                  placeholder="Find a website or company…"
-                  aria-label="Search websites" /></label
-              ><label class="select-wrap"
-                ><span>Collection</span
-                ><select id="batch" aria-label="Filter by starter cohort">
-                  <option value="">All websites</option>
-                </select></label
-              ><label class="select-wrap"
-                ><span>Order</span
-                ><select id="sort" aria-label="Sort leaderboard">
-                  <option value="releases">Most releases</option>
-                  <option value="weekend">Weekend shippers</option>
-                  <option value="recent">Recently shipped</option>
-                </select></label
-              >
-            </div>
-            <div class="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th class="rank-column">#</th>
-                    <th>WEBSITE</th>
-                    <th>COLLECTION</th>
-                    <th class="numeric">RELEASES</th>
-                    <th class="numeric">WEEKEND</th>
-                    <th>LAST SHIP</th>
-                    <th>STATUS</th>
-                  </tr>
-                </thead>
-                <tbody id="companies">
-                  <tr>
-                    <td colspan="7" class="table-empty">Loading websites…</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="table-footer">
-              <span id="results-label">Loading…</span>
+        <div class="index-layout">
+          <section class="leaderboard-section" id="leaderboard">
+            <div class="section-intro">
               <div>
-                <button
-                  class="page-button"
-                  id="previous"
-                  aria-label="Previous page"
-                >
-                  Previous</button
-                ><button class="page-button" id="next" aria-label="Next page">
-                  Next
-                </button>
+                <h1>The index</h1>
+              </div>
+              <div class="window-switch" aria-label="Ranking period">
+                <button data-days="7">7 days</button
+                ><button data-days="30" class="selected">30 days</button>
               </div>
             </div>
-          </div>
-          <p class="fine-print">
-            Anyone can add a public website. YC companies are simply our
-            starting set. A release is a confirmed, previously unseen frontend
-            fingerprint. It isn't a commit count or a measure of team
-            productivity.
-            <button class="text-button" id="method-inline">
-              Read the methodology
-            </button>
-          </p>
-        </section>
-        <div class="observatory">
-          <section class="signals-section" aria-label="Latest release signals">
-            <div class="radar-card">
-              <div class="card-heading">
-                <h2>Recently observed</h2>
+            <div class="table-card">
+              <div class="filters">
+                <label class="search-box"
+                  ><input
+                    id="search"
+                    type="search"
+                    placeholder="Find a website or company…"
+                    aria-label="Search websites"
+                /></label>
+                <label class="filter-control"
+                  ><span>Collection</span
+                  ><select id="batch" aria-label="Collection">
+                    <option value="">All websites</option>
+                  </select></label
+                >
+                <label class="filter-control"
+                  ><span>Order</span
+                  ><select id="sort" aria-label="Order">
+                    <option value="releases">Most releases</option>
+                    <option value="recent">Recently shipped</option>
+                  </select></label
+                >
               </div>
-              <div id="feed" class="feed">
-                <div class="empty-feed">
-                  <strong>Listening for the next ship.</strong>
-                  <p>
-                    New releases appear here after confirmation.<br />No
-                    backfilled or estimated activity.
-                  </p>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="rank-column">#</th>
+                      <th>WEBSITE</th>
+                      <th>COLLECTION</th>
+                      <th class="numeric">RELEASES</th>
+                      <th>LAST SHIP</th>
+                      <th>STATUS</th>
+                    </tr>
+                  </thead>
+                  <tbody id="companies">
+                    <tr>
+                      <td colspan="6" class="table-empty">Loading websites…</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="table-footer">
+                <span id="results-label">Loading…</span>
+                <div>
+                  <button
+                    class="page-button"
+                    id="previous"
+                    aria-label="Previous page"
+                  >
+                    Previous</button
+                  ><button class="page-button" id="next" aria-label="Next page">
+                    Next
+                  </button>
                 </div>
               </div>
             </div>
+            <p class="fine-print">
+              Anyone can add a public website. The YC directory is a starter
+              set.
+              <a href="/how-it-works">How it works</a>
+            </p>
           </section>
+          <div class="observatory">
+            <section
+              class="signals-section"
+              aria-label="Latest release signals"
+            >
+              <div class="radar-card">
+                <div class="card-heading">
+                  <h2>Recently observed</h2>
+                </div>
+                <div id="feed" class="feed">
+                  <div class="empty-feed">
+                    <strong>Listening for the next ship.</strong>
+                    <p>
+                      New releases appear here after confirmation.<br />No
+                      backfilled or estimated activity.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
       <article id="company-page" hidden>
@@ -155,15 +149,100 @@
           Loading observation history…
         </div>
       </article>
+      <article id="method-page">
+        <a class="back-link" href="/#leaderboard">Back to the index</a>
+        <h1>How it works</h1>
+        <div class="method-step">
+          <b>01</b>
+          <div>
+            <h3>Look every five minutes</h3>
+            <p>
+              We fetch each eligible public page and compare its first-party
+              JavaScript content or a selected public API schema. Sibling subdomain bundles
+              and linked chunks are included within a bounded budget. Checks are
+              spread out, with backoff for failures.
+            </p>
+          </div>
+        </div>
+        <div class="method-step">
+          <b>02</b>
+          <div>
+            <h3>Confirm the change</h3>
+            <p>
+              The first successful check establishes a baseline. A different
+              content fingerprint must persist on a follow-up check before we record it.
+              Deployment IDs, known Sentry debug metadata, and hashed asset references do not count by themselves.
+              Multiple changes within the same five-minute interval count once per website.
+              Previously seen fingerprints and rollbacks don't add to the count.
+            </p>
+          </div>
+        </div>
+        <div class="method-step">
+          <b>03</b>
+          <div>
+            <h3>Keep the limits visible</h3>
+            <p>
+              These are observed public code and API-schema changes, not commits, verified backend
+              deployments, or employee working hours. A/B tests and regional
+              rollouts can still introduce noise. Multiple releases between
+              checks can be missed.
+            </p>
+          </div>
+        </div>
+        <div class="method-step">
+          <b>04</b>
+          <div>
+            <h3>Compare what we actually saw</h3>
+            <p>
+              Rankings use 7- or 30-day windows. New companies have shorter
+              observation histories. Every profile shows its baseline date and
+              successful checks. Timestamps use your device’s timezone. Rate
+              calculations use completed UTC days.
+            </p>
+          </div>
+        </div>
+        <p class="fine-print">
+          YC directory data comes from the unofficial
+          <a href="https://github.com/yc-oss/api" target="_blank" rel="noopener"
+            >yc-oss API</a
+          >. Active and public companies with usable URLs are eligible.
+          Marketing websites may release independently of the product. We
+          inspect up to 32 first-party assets per page, including imports and Vite-listed styles,
+          with a 20 MB response budget. Conditional requests reuse unchanged content.
+          Uninspected routes and third-party CDN assets can be missed. Older deployment-based
+          observations are excluded unless their historical content can be reverified.
+          Luna classifies code differences and summarizes application changes. Build-only,
+          uncertain, and unclassified observations are excluded from public histories.
+          AI classifications can be wrong.
+        </p>
+        <h2>Finding subdomains</h2>
+        <p>
+          Subfinder finds subdomains through passive sources, including certificate transparency—not homepage links.
+          A model shortlists hosts, then reviews inspected apps and public API schemas; you choose what
+          gets monitored. Discovery is bounded and can miss unlisted or private apps.
+        </p>
+        <h2>API changes</h2>
+        <p>
+          We compare API request references extracted from saved JavaScript and can monitor public
+          OpenAPI or Swagger documents. A new client reference does not prove an endpoint was just
+          added to the server. Private backend deployments and ordinary changing API data are not visible here.
+        </p>
+        <h2>Why a website may not be checked successfully</h2>
+        <p>
+          Some sites have no observable first-party JavaScript, disallow checks
+          in robots.txt, block requests, or return errors. Failed checks retry
+          with backoff. A domain count means selected monitored hosts—not all
+          subdomains a company owns.
+        </p>
+      </article>
     </main>
     <footer>
       <a class="wordmark" href="/">shipwatch</a
-      ><span>An independent observatory. Not a productivity score.</span
       ><a
         href="https://github.com/dennisimoo/shipwatch"
         target="_blank"
         rel="noopener"
-        >Open source. Open methodology.</a
+        >Source code</a
       >
     </footer>
     <dialog id="add-dialog">
@@ -181,8 +260,8 @@
         </div>
         <h2>Who's shipping?</h2>
         <p>
-          Enter a website. Luna will review linked domains and subdomains; you
-          choose which ones to monitor.
+          Enter a website. We’ll find subdomains for you to
+          choose from.
         </p>
         <fieldset id="discovery-inputs">
           <label
@@ -191,20 +270,10 @@
               type="text"
               required
               maxlength="1500"
-              placeholder="https://example.com" /></label
-          ><label
-            >Website name <span class="muted">(optional)</span
-            ><input
-              name="name"
-              type="text"
-              maxlength="100"
-              placeholder="Your website"
+              placeholder="example.com"
+              autocomplete="url"
+              inputmode="url"
           /></label>
-          <p class="fine-print">
-            One URL per domain or subdomain. Discovery follows public links; it
-            does not enumerate hidden hosts. Choose at least one URL from the
-            results.
-          </p>
         </fieldset>
         <section id="discovery-review" hidden>
           <div class="review-heading">
@@ -222,80 +291,12 @@
         </button>
         <p id="submission-message" role="status"></p>
         <p class="fine-print">
-          Public HTTP/HTTPS pages only. We respect robots.txt and don't sign
-          into websites. Luna's suggestions can be checked or unchecked before
-          you start.
+          Public pages only. We respect robots.txt and never sign
+          in.
         </p>
       </form>
     </dialog>
-    <dialog id="method-dialog">
-      <div class="dialog-heading">
-        <span class="eyebrow">UNDER THE HOOD</span
-        ><button
-          class="close-button"
-          data-close="method-dialog"
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </div>
-      <h2>Signals, not guesses.</h2>
-      <div class="method-step">
-        <b>01</b>
-        <div>
-          <h3>Look every five minutes</h3>
-          <p>
-            We fetch each eligible public page and inspect its first-party
-            JavaScript URLs, content hashes, and exposed build ID. Checks are
-            spread out, with backoff for failures.
-          </p>
-        </div>
-      </div>
-      <div class="method-step">
-        <b>02</b>
-        <div>
-          <h3>Confirm the change</h3>
-          <p>
-            The first successful check establishes a baseline. A different
-            fingerprint must persist on a follow-up check before we record it.
-            Previously seen fingerprints and rollbacks don't add to the count.
-          </p>
-        </div>
-      </div>
-      <div class="method-step">
-        <b>03</b>
-        <div>
-          <h3>Keep the limits visible</h3>
-          <p>
-            These are observed frontend releases, not commits, backend
-            deployments, or employee working hours. A/B tests and regional
-            rollouts can still introduce noise. Multiple releases between checks
-            can be missed.
-          </p>
-        </div>
-      </div>
-      <div class="method-step">
-        <b>04</b>
-        <div>
-          <h3>Compare what we actually saw</h3>
-          <p>
-            Rankings use 7- or 30-day windows. New companies have shorter
-            observation histories. Every profile shows its baseline date and
-            successful checks. Weekend and hourly aggregates use UTC.
-          </p>
-        </div>
-      </div>
-      <p class="fine-print">
-        YC directory data comes from the unofficial
-        <a href="https://github.com/yc-oss/api" target="_blank" rel="noopener"
-          >yc-oss API</a
-        >. Active and public companies with usable URLs are eligible. Marketing
-        websites may release independently of the product. We inspect script
-        URLs and up to eight stable-name scripts per page; hashed script URLs
-        are tracked without repeatedly downloading their contents. Lazy-loaded
-        routes and third-party CDN assets can be missed.
-      </p>
-    </dialog>
+
     <div id="connection-error" class="connection-error" role="status" hidden>
       Connection interrupted. Retrying shortly.
     </div>

@@ -3,7 +3,7 @@
 <p align="center"><strong>A closer look at who's shipping.</strong><br>A public pulse on frontend releases across the web.</p>
 
 <p align="center">
-  <a href="https://shipwatch.54.219.237.10.sslip.io">Live site</a> ·
+  <a href="https://shipwatch.sh">Live site</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#what-counts-as-a-release">Methodology</a> ·
   <a href="https://github.com/dennisimoo/shipwatch/issues">Feedback</a>
@@ -20,10 +20,11 @@
 Watch public JavaScript bundles every five minutes and see which websites change, how often, and when.
 
 - **Who's shipping:** 7- and 30-day leaderboards, website search, and cohort filters.
-- **When they ship:** per-website daily release graphs and weekend counts in UTC.
-- **Share a website:** permanent `/company/:id` pages with release history and a copy-link control.
+- **Browse the index:** rankings live on the homepage; filters use native selects and recent activity sits beside the table.
+- **When they ship:** interactive per-website release graphs and hourly/daily views in your local time.
+- **Share a website:** readable `/company/:slug` pages with release history and a copy-link control.
 - **Show the evidence:** each company has its baseline date, check history, and release fingerprints.
-- **Bring a website:** discover linked domains, review Luna's suggestions, and check the URLs you want to monitor.
+- **Bring a website:** discover subdomains, review Luna's suggestions, and check the URLs you want to monitor.
 
 **Any public website can join.** The prefilled starter dataset is **797 active/public companies from YC's Winter, Spring, Summer, and Fall 2026 batches**. Older companies aren't kept in a separate directory. New sites start with a baseline; history fills in as the observer runs.
 
@@ -48,17 +49,27 @@ bun test
 bun run typecheck
 ```
 
-AI URL discovery needs a server-side `OPENAI_API_KEY` with access to `gpt-6-luna` through the [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions). Existing monitoring and read APIs work without that key. Credentials never go to the browser.
+AI discovery and change analysis need a server-side `OPENAI_API_KEY` with access to `gpt-6-luna`. Discovery uses the [Decisions API](https://developers.openai.com/api/docs/guides/decisions); classification and one-sentence change summaries share one structured Responses API call. Polling and read APIs work without a key, but unclassified observations do not enter application-change rankings. Credentials never go to the browser.
+
+Install [Subfinder](https://docs.projectdiscovery.io/opensource/subfinder/install) and [jsluice](https://github.com/BishopFox/jsluice) on the server's `PATH` (`deploy/setup.sh` pins both). Subfinder aggregates passive providers, including certificate-transparency sources; an empty scan triggers a bounded direct crt.sh fallback. Results are cached per domain for a day; scanning is not repeated during five-minute monitoring checks. Jsluice analyzes saved JavaScript locally, without requesting the extracted endpoints.
+
+## Local preview
+
+Run `HOST=127.0.0.1 PORT=3088 POLL_ENABLED=0 DATABASE_PATH=/path/to/local-copy.sqlite bun run dev` to browse a local database snapshot without background polling. The UI marks it as paused preview data. Submission accepts a bare domain such as `example.com`; a name is not required. Discovery still requires the server API key described above.
 
 ## Pick what gets watched
 
-Enter a company website, then check or uncheck the discovered URLs. At least one URL is required. **Visitors cannot change discovery or monitoring limits.** Both are owned by the server in `config.json`: review up to **12 candidate domains** and monitor at most **3 domains** per company by default. Operators edit that file and restart the app; there are no environment variables or public settings endpoints for these limits.
+Enter a website URL (with or without `https://`), then check or uncheck the discovered URLs. At least one URL is required. **Visitors cannot change discovery or monitoring limits.** Both are owned by the server in `config.json`: review up to **12 candidate domains** and monitor at most **3 domains** per company by default. Operators edit that file and restart the app; there are no environment variables or public settings endpoints for these limits.
 
-Discovery follows actual public links on related domains, using the public-suffix list to keep unrelated sites separate. It inspects at most one URL per discovered hostname, within the server's review budget, and asks Luna one yes/no question for each: **should this URL be monitored as the company's product app?** Suggestions with a yes probability of at least 70% are prechecked up to the server's monitoring cap. You can check or uncheck any inspectable URL before confirming, including overriding a suggestion.
+Discovery uses passive Subfinder results—not homepage links. When the inventory exceeds the inspection budget, Luna first shortlists hostnames for distinct production apps and API documentation rather than taking the first names alphabetically. This is only a shortlist, not evidence a host is live. The submitted website always retains one inspection slot. The public-suffix list keeps unrelated sites separate, including private suffixes such as `github.io`.
 
-Each selected URL gets its own baseline and polling state. Company release counts deduplicate identical fingerprints across its URLs. Profiles show the actual monitored URLs; release evidence retains the originating URL. Discovery is not a subdomain scan and cannot find unlinked or private apps.
+Each shortlisted host is inspected within the 12-host budget. For roots returning 404 or no observable first-party JavaScript, discovery also tries `/openapi.json` and `/swagger.json`, respecting each path's robots policy. Only pages with observable first-party scripts or valid public API schemas qualify; ordinary JSON responses do not. Luna's Decisions API then asks one yes/no question per usable candidate: **is this a useful public website, application, or API schema to monitor?** Internal dashboards, operational tools, login screens, and public API definitions are eligible. Suggestions with a yes probability of at least 70% are prechecked up to the monitoring cap. You can check or uncheck any inspectable URL before confirming. Hostname shortlisting uses one structured Responses call only when needed; final page selection still uses Decisions.
 
-The existing YC cohort is reviewed gradually in the background. If Luna recommends no URLs or discovery fails, the existing homepage stays monitored and the profile says so. Successful reviews are saved; Luna is not called during five-minute bundle checks. There are no page categories or second classifier.
+Each selected URL gets its own baseline and polling state. Company release counts deduplicate identical fingerprints across its URLs. Profiles show the actual monitored URLs; release evidence retains the originating URL. Passive sources are incomplete and can contain stale names; only inspected public pages can be selected.
+
+Readable company slugs are stored once and remain stable if a company name changes; duplicate names get a numeric suffix. Legacy YC-ID page URLs are not retained.
+
+The existing YC cohort is reviewed with at most two background reviews at once and three concurrent page inspections across reviews. Subfinder requests are rate-limited and each scan has a 45-second deadline. Failed reviews retry after an hour. If Luna recommends no URLs or discovery fails, the existing selection stays monitored. Successful reviews are saved. Old reviews are not automatically overwritten; requeue them deliberately to refresh discovery.
 
 ## What counts as a release?
 
@@ -67,21 +78,33 @@ Public page → script URLs + content fingerprints → confirm change → SQLite
 ```
 
 1. **Establish a baseline.** The first successful observation never counts as a release.
-2. **Watch first-party JavaScript.** Compare script/module-preload URLs, content hashes for up to eight stable-name scripts, and exposed build IDs. Use conditional requests to avoid downloading unchanged files; track content-hashed filenames by URL.
+2. **Watch first-party content.** Compare normalized content across up to 32 first-party assets and 20 MB per page, following JavaScript imports and Vite-listed styles. Ignore Vercel `dpl` parameters, known Sentry debug/release metadata, source-map comments, and asset-reference filename hashes. Conditional requests reuse unchanged content; raw URLs and hashes remain in the evidence. This is not a semantic JavaScript diff.
 3. **Confirm it.** A new fingerprint must persist on a follow-up check, targeted for one minute later.
-4. **Count it once.** Previously confirmed versions, including the initial baseline, don't count again after a rollback.
+4. **Count it once.** Previously confirmed versions, including the initial baseline, don't count again after a rollback. Multiple confirmed changes in the same UTC-aligned five-minute interval count once per company, not once per changed file or monitored URL.
+
+Confirmed observations are retained separately from **application changes**. Bundle bodies are gzip-compressed and deduplicated by raw SHA-256 in SQLite. Unchanged or deterministically metadata-only comparisons make no model call. For remaining differences, Bun formats captured code and `diff` produces context hunks within a 400,000-character request budget; Luna returns `classification` (`application`, `build-only`, or `uncertain`) and a short plain-English `summary` in one request. Identical version-pair results are reused. Oversized or ambiguously paired assets are omitted; remaining code can still support a concrete application change, but incomplete evidence cannot establish build-only. Missing bodies and exhausted API retries stay uncertain. Only `application` results enter rankings, charts, and public release logs. Other observations remain in SQLite, not in the public UI. These are AI interpretations of captured client code, not verified product changelogs.
+
+**Do not restart history.** Run `bun run recheck:history --apply --analyze` to recover and analyze available historical versions (optionally `--company=<id>`). Saved raw hashes must match before recovered code is used. Unrecoverable observations remain unclassified or uncertain. Existing baselines, timestamps, and raw records are preserved. Uncaptured lazy chunks and unavailable historical baselines limit what can be explained.
+
+Full downloaded bundles are retained, not just the snippets sent to Luna. Each distinct capture keeps its URLs, raw hashes, and first/last observation times, including metadata-only versions. Compression and content-addressed storage avoid duplicate bodies without discarding code. Capture is still bounded by the fetch budget; unvisited routes are not magically archived. Future summaries use short, nontechnical language and can describe API/client logic or shared code, but cannot prove an unseen backend deployment.
+
+Sibling assets such as `app.example.com` loading `cdn.example.com` are included within the same registrable domain; unrelated tenants and domains are excluded. Jsluice extracts API request references from archived JavaScript once per raw hash. Before/after comparisons include first-party endpoint paths, methods, and parameter names, with query values and headers omitted. Each extraction has a ten-second deadline; the comparison has a bounded time budget and sends at most 100 added and 100 removed references to Luna. Failures are logged and passed to the model as incomplete coverage, not empty results. These are changes in client references, not proof an endpoint was created or deleted on the server. Public OpenAPI/Swagger URLs can also be monitored directly: captured schema changes use the same confirmation and classification flow. Arbitrary API data and health-response timestamps are not counted as deployments.
+
+Expanding capture scope establishes a fresh fingerprint baseline on the next successful check, without adding a release or deleting existing history. Subsequent changes use the normal confirmation flow.
+
+Content-based tracking uses a fresh baseline without manufacturing a release or deleting old evidence. Earlier deployment-based observations stay in SQLite but do not affect current rankings. `bun run recheck:history` audits all historical records; add `--apply` to restore verified content transitions. It fetches saved asset URLs, checks their raw hashes against the original evidence, and skips unrecoverable history instead of guessing. The first recoverable version establishes a baseline, not a release. Referenced chunks were not originally archived; their historical URLs are fetched where available.
 
 Event times mean **first detected**, with the previous successful check and confirmation time preserved. Rankings cover observed events in the selected window. Company profiles show how long we've actually been watching.
 
 There is no network-wide release total presented as a success metric: adding more websites would inflate it. Profiles show a site's own daily history and releases per observed day. The rate only includes completed UTC dates with successful checks after the baseline, excluding a partial baseline date and today. Missing dates are gaps, not zeroes; a date with successful checks does not imply uninterrupted coverage. A new site with no eligible dates has no rate yet. Charts aggregate all releases in their date range, independently of the profile's 100-event log limit.
 
-**Limits:** backend-only deploys, commits, lazy-loaded routes, and scripts on unrelated CDN domains can be missed. CDN caching delays observations; multiple releases between checks can be missed; A/B tests and regional variants can introduce noise. A marketing homepage may deploy separately from the product. Weekend and hourly stats use **UTC**.
+**Limits:** backend-only deploys, commits, lazy-loaded routes, and scripts on unrelated CDN domains can be missed. CDN caching delays observations; multiple releases between checks can be missed; A/B tests and regional variants can introduce noise. A marketing homepage may deploy separately from the product. Timestamps and chart periods use the browser’s local timezone. Daily-average rates use completed **UTC** observation dates.
 
 ## Small on purpose
 
 **One EC2 instance. One Bun process. One SQLite database.**
 
-The interface is plain HTML, CSS, and a small browser script. It pairs self-hosted [Chakra Petch](https://github.com/google/fonts/tree/main/ofl/chakrapetch) capitals with [Source Serif 4](https://github.com/adobe-fonts/source-serif), both distributed under their included SIL Open Font Licenses. Company charts use native SVG with a plain HTML data table. No frontend framework, charting dependency, or build step.
+The interface is plain HTML, CSS, and a small browser script. It pairs self-hosted [Chakra Petch](https://github.com/google/fonts/tree/main/ofl/chakrapetch) capitals with [Source Serif 4](https://github.com/adobe-fonts/source-serif), both distributed under their included SIL Open Font Licenses. Charts use [uPlot](https://github.com/leeoniya/uPlot) for hover values, with a scrollable HTML data table. Its installed JavaScript and CSS are served locally; no frontend framework or build step. Google’s favicon service supplies the icons beside website names.
 
 | Piece                             | Choice                                            |
 | --------------------------------- | ------------------------------------------------- |
@@ -111,7 +134,10 @@ src/
   detect.ts      Script discovery and fingerprints
   poller.ts      Scheduling, confirmations, failure backoff
   import-yc.ts   Import only eligible recent YC companies
-  discovery.ts   Linked domains, Luna decisions, bounded selection
+  discovery.ts   Public pages, Luna decisions, bounded selection
+  subdomains.ts  Cached passive Subfinder discovery
+  analysis.ts    Compressed bundles, code diffs, Luna summaries
+  api-references.ts  Cached jsluice request-reference comparisons
   server.ts      Website and API
 public/          Responsive website
 tests/           Detection, safety boundary, and lifecycle checks
@@ -136,7 +162,7 @@ deploy/          EC2 service, HTTPS setup, daily SQLite backup
 | ---------------------------- | ------------------------------------------------------------------------------------------------ |
 | `GET /api/summary`           | Counts, coverage, activity, batches, UTC heatmap                                                 |
 | `GET /api/companies`         | Leaderboard; accepts `days`, `sort`, `batch`, `search`, `page`                                   |
-| `GET /api/company/:id`       | Profile, up to 100 release events, daily check totals                                            |
+| `GET /api/company/:slug`     | Profile, up to 100 release events, daily check totals                                            |
 | `GET /api/discovery-options` | Discovery availability; limits cannot be changed here                                            |
 | `POST /api/discover`         | Review `{ "url": "https://example.com", "name": "Example" }`; returns a 30-minute review token   |
 | `POST /api/companies`        | Confirm `{ "token": "review-token", "selected": ["https://app.example.com/"] }` from that review |
