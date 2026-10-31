@@ -1,4 +1,5 @@
 import { gunzipSync } from "node:zlib";
+import pLimit from "p-limit";
 import { db, now } from "./db";
 import { extract, type Reference } from "./api-references";
 import { hash } from "./detect";
@@ -198,10 +199,10 @@ export async function buildBackendMap(companyUrl: string, captures: Capture[], d
   let incomplete = false;
   for (const capture of captures) {
     const evidence = JSON.parse(capture.evidence) as {
-      content?: { url: string; hash: string }[]; hosting?: string[]; uninspected?: string[];
+      content?: { url: string; hash: string }[]; hosting?: string[]; uninspected?: string[]; missing?: string[];
     };
     for (const name of evidence.hosting ?? []) hosting.add(name);
-    if (evidence.uninspected?.length) incomplete = true;
+    if (evidence.uninspected?.length || evidence.missing?.length) incomplete = true;
     for (const asset of evidence.content ?? []) {
       assetUrls.push(asset.url);
       if (/\.css(?:\?|$)/.test(asset.url)) continue;
@@ -287,8 +288,9 @@ export async function buildBackendMap(companyUrl: string, captures: Capture[], d
 }
 
 const building = new Map<string, Promise<BackendMap>>();
+const mapBuilds = pLimit(2);
 // Bump when the map's shape or rules change so cached maps are rebuilt.
-const mapVersion = 2;
+const mapVersion = 3;
 
 /** Cached per company and current capture set; rebuilds only when the latest captures change. */
 export async function backendMap(companyId: string): Promise<BackendMap | null> {
@@ -308,7 +310,7 @@ export async function backendMap(companyId: string): Promise<BackendMap | null> 
   }
   let pending = building.get(companyId);
   if (!pending) {
-    pending = buildBackendMap(company.url, captures).then((map) => {
+    pending = mapBuilds(() => buildBackendMap(company.url, captures)).then((map) => {
       db.query("INSERT OR REPLACE INTO metadata VALUES (?,?)").run(key, JSON.stringify({ version, map }));
       return map;
     }).finally(() => building.delete(companyId));

@@ -169,6 +169,7 @@ export async function snapshot(
   url: string,
   previous: Record<string, Asset>,
   saveBody?: (hash: string, body: string) => void,
+  previousScope?: string,
 ): Promise<Snapshot> {
   const page = await fetchPublic(url, { Accept: "text/html, application/json;q=0.9" });
   checkBackoff(page);
@@ -187,7 +188,7 @@ export async function snapshot(
   if (!scripts.length)
     throw new Error("No observable first-party JavaScript on this page");
   const build = page.body.match(/"buildId"\s*:\s*"([^"<>]{1,200})"/)?.[1] || null;
-  const result = await inspectBundles(page.url, scripts, previous, page.bytes, build, saveBody);
+  const result = await inspectBundles(page.url, scripts, previous, page.bytes, build, saveBody, previousScope);
   result.transferBytes += page.transferBytes ?? page.bytes;
   const hosting = hostingFromHeaders(page.headers);
   const deployment = deploymentId(page.body, build);
@@ -203,6 +204,7 @@ export async function inspectBundles(
   initialBytes = 0,
   build: string | null = null,
   saveBody?: (hash: string, body: string) => void,
+  previousScope?: string,
 ): Promise<Snapshot> {
   const assets: Record<string, Asset> = {};
   let bytes = initialBytes;
@@ -218,9 +220,19 @@ export async function inspectBundles(
   for (let index = 0; index < queue.length && Object.keys(assets).length < assetLimit; index++) {
     const script = queue[index];
     const old = previous[script];
-    if (old?.method === "content-v3" && old.immutable && old.fetchedAt && fetchedAt - old.fetchedAt < revalidateAfter) {
+    if (bytes >= byteLimit) {
+      if (!Object.keys(assets).length) throw new Error("Bundle inspection exceeds size limit");
+      break;
+    }
+    const limit = Math.min(5_000_000, byteLimit - bytes);
+    const currentCache = old?.method === "content-v3.1" && typeof old.size === "number";
+    if (currentCache && old.size! > limit) {
+      if (!Object.keys(assets).length) throw new Error("Bundle inspection exceeds size limit");
+      break;
+    }
+    if (currentCache && old.immutable && old.fetchedAt && fetchedAt - old.fetchedAt < revalidateAfter) {
       assets[script] = old;
-      bytes += old.size ?? 0;
+      bytes += old.size!;
       for (const reference of old.references ?? [])
         if (firstParty(reference) && !queued.has(reference)) {
           queue.push(reference);
@@ -229,14 +241,8 @@ export async function inspectBundles(
       continue;
     }
     const headers: Record<string, string> = {};
-    const currentCache = old?.method === "content-v3.1";
     if (currentCache && old.etag) headers["If-None-Match"] = old.etag;
     if (currentCache && old.modified) headers["If-Modified-Since"] = old.modified;
-    if (bytes >= byteLimit) {
-      if (!Object.keys(assets).length) throw new Error("Bundle inspection exceeds size limit");
-      break;
-    }
-    const limit = Math.min(15_000_000, byteLimit - bytes);
     if (old?.method === "too-large" && old.fetchedAt && fetchedAt - old.fetchedAt < revalidateAfter && (old.size ?? 0) > limit) {
       tooLarge[script] = old;
       break;
@@ -252,7 +258,7 @@ export async function inspectBundles(
       }
       throw error;
     }
-    bytes += asset.status === 304 ? old?.size ?? 0 : asset.bytes;
+    bytes += asset.status === 304 && currentCache ? old.size! : asset.bytes;
     transferBytes += asset.transferBytes ?? asset.bytes;
     checkBackoff(asset);
     if (!firstParty(asset.url)) throw new Error("Bundle redirected outside the website's domain");
@@ -263,7 +269,8 @@ export async function inspectBundles(
       continue;
     }
     if (asset.status === 304 && currentCache)
-      assets[script] = { ...old, immutable: immutableAsset(script, asset.headers["cache-control"]) || old.immutable, fetchedAt };
+      assets[script] = { ...old, immutable: asset.headers["cache-control"] === undefined
+        ? old.immutable : immutableAsset(script, asset.headers["cache-control"]), fetchedAt };
     else if (asset.status === 200) {
       let references: string[] = [];
       try {
@@ -317,6 +324,7 @@ export async function inspectBundles(
   const gone = missing.map(assetIdentity).sort();
   const fingerprint = "content-v3:" + hash(JSON.stringify(gone.length ? { content, uninspected, missing: gone } : { content, uninspected }));
   // Sticky once a site has used builder assets, so one page load without them can't reset the baseline.
-  const captureScope = builders.size || Object.keys(previous).some(builderSite) ? "registrable-128-v3" : "registrable-128-v2";
+  const captureScope = builders.size || previousScope === "registrable-128-v3" || Object.keys(previous).some(builderSite)
+    ? "registrable-128-v3" : "registrable-128-v2";
   return { fingerprint, assets: { ...assets, ...tooLarge }, evidence, bytes, transferBytes, captureScope };
 }

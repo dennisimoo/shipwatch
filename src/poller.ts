@@ -29,6 +29,7 @@ export async function checkCompany(company: Target) {
       company.url,
       previous,
       saveBody,
+      company.capture_scope ?? undefined,
     );
     bytes += result.transferBytes;
     recordSnapshot(company, result, now());

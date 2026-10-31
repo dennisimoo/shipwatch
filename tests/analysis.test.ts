@@ -173,3 +173,26 @@ test("plain summaries pass the jargon check", async () => {
   expect(technicalSummary("Calls /api/brands before loading.")).toBe(true);
   expect(technicalSummary("Adds Chinese and Japanese translations for the network pages.")).toBe(false);
 });
+
+test("unavailable and recovered scripts are not mistaken for removed or added features", async () => {
+  const stable = evidence("const home=true;", "https://example.com/home.js");
+  const checkout = evidence("const checkoutEnabled=true;", "https://example.com/checkout.js");
+  const complete = { content: [...stable.content, ...checkout.content] };
+  for (const missing of [checkout.content[0].url, "https://example.com/checkout-new-hash.js"]) {
+    const unavailable = { ...stable, missing: [missing] };
+    const removed = comparison(complete, unavailable);
+    expect(removed.unseenChanged).toBe(true);
+    expect(removed.patch).toBe("");
+    expect((await classifyChange(removed)).classification).toBe("uncertain");
+    const recovered = comparison(unavailable, complete);
+    expect(recovered.unseenChanged).toBe(true);
+    expect(recovered.patch).toBe("");
+  }
+  const capped = comparison(complete, { ...stable, uninspected: [checkout.content[0].url] });
+  expect(capped.unseenChanged).toBe(true);
+  expect(capped.patch).toBe("");
+  const changed = comparison(complete, { ...evidence("const home=false;", stable.content[0].url), missing: [checkout.content[0].url] });
+  expect(changed.unseenChanged).toBe(true);
+  expect(changed.patch).toContain("home = false");
+  expect(changed.patch).not.toContain("checkoutEnabled");
+});

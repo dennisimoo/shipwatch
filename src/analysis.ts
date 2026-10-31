@@ -22,10 +22,11 @@ export function technicalSummary(summary: string): boolean {
 interface Evidence {
   content: { url: string; hash: string }[];
   uninspected?: string[];
+  missing?: string[];
 }
 const printer = new Bun.Transpiler({ loader: "js", minifyWhitespace: false });
 export const analysisModel = "gpt-6-luna";
-export const analysisVersion = 3;
+export const analysisVersion = 4;
 
 export function saveBody(digest: string, body: string) {
   if (hash(body) !== digest) throw new Error("Bundle archive hash mismatch");
@@ -44,6 +45,14 @@ export function comparison(before: Evidence, after: Evidence): { patch: string; 
   let unseenChanged = JSON.stringify((before.uninspected ?? []).map(canonicalUrl).sort()) !==
     JSON.stringify((after.uninspected ?? []).map(canonicalUrl).sort());
   if (unseenChanged) reasons.add("The uncaptured asset inventory changed");
+  const previousMissing = new Set((before.missing ?? []).map(canonicalUrl));
+  const currentMissing = new Set((after.missing ?? []).map(canonicalUrl));
+  const previousUnavailable = new Set([...previousMissing, ...(before.uninspected ?? []).map(canonicalUrl)]);
+  const currentUnavailable = new Set([...currentMissing, ...(after.uninspected ?? []).map(canonicalUrl)]);
+  if (previousMissing.size || currentMissing.size) {
+    unseenChanged = true;
+    reasons.add("Some referenced scripts were unavailable; their additions or removals cannot be established");
+  }
   const sources = new Map<BundleEntry, string>();
   const source = (entry: BundleEntry) => {
     if (!sources.has(entry)) {
@@ -54,7 +63,9 @@ export function comparison(before: Evidence, after: Evidence): { patch: string; 
     }
     return sources.get(entry)!;
   };
-  const { pairs, ambiguous, duplicateUrls } = pairBundles(before.content, after.content, source);
+  const { pairs, ambiguous, duplicateUrls } = pairBundles(
+    before.content.filter((entry) => !currentUnavailable.has(canonicalUrl(entry.url))),
+    after.content.filter((entry) => !previousUnavailable.has(canonicalUrl(entry.url))), source);
   if (duplicateUrls) {
     unseenChanged = true;
     reasons.add("Duplicate asset URLs in saved evidence");
@@ -66,6 +77,11 @@ export function comparison(before: Evidence, after: Evidence): { patch: string; 
   const chunks: string[] = [];
   for (const [old, next] of pairs) {
     if (old?.hash === next?.hash) continue;
+    if ((!next && currentUnavailable.size) || (!old && previousUnavailable.size)) {
+      unseenChanged = true;
+      reasons.add("Unpaired code may belong to unavailable scripts");
+      continue;
+    }
     const oldSource = old ? source(old) : "";
     const newSource = next ? source(next) : "";
     if (oldSource === newSource) continue;
@@ -152,7 +168,10 @@ export async function analyzeNext() {
       const current = JSON.parse(pending.evidence) as Evidence;
       const input: Parameters<typeof classifyChange>[0] = comparison(previous, current);
       if (input.patch && pending.url) {
-        try { input.apiChanges = await apiChanges(previous, current, pending.url); }
+        try {
+          input.apiChanges = await apiChanges(previous, current, pending.url);
+          if (input.apiChanges.incomplete) input.apiWarning = "Unavailable scripts prevent establishing some added or removed API references.";
+        }
         catch (error) {
           input.apiWarning = error instanceof Error ? error.message : "API extraction failed";
           console.error("api-extraction", pending.release_id, input.apiWarning);
