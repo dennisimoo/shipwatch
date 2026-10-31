@@ -69,6 +69,16 @@ db.exec(`
     candidate_limit INTEGER NOT NULL DEFAULT 12 CHECK(candidate_limit BETWEEN 1 AND 30),
     next_attempt INTEGER NOT NULL DEFAULT 0, error TEXT, review TEXT, updated_at INTEGER
   );
+  CREATE TABLE IF NOT EXISTS deploys (
+    company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE, url TEXT NOT NULL,
+    deployment TEXT NOT NULL, first_seen INTEGER NOT NULL, baseline INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(company_id, deployment)
+  );
+  CREATE TABLE IF NOT EXISTS archived_builds (
+    company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE, url TEXT NOT NULL, build TEXT NOT NULL,
+    first_archived INTEGER NOT NULL, last_archived INTEGER NOT NULL, recorded_at INTEGER NOT NULL,
+    PRIMARY KEY(company_id, url, build)
+  );
   CREATE TABLE IF NOT EXISTS discovery_drafts (
     token TEXT PRIMARY KEY, payload TEXT NOT NULL, expires_at INTEGER NOT NULL
   );
@@ -78,6 +88,8 @@ if (!(db.query("PRAGMA table_info(targets)").all() as { name: string }[]).some((
   db.exec("ALTER TABLE targets ADD COLUMN capture_scope TEXT");
 if (!(db.query("PRAGMA table_info(change_analysis)").all() as { name: string }[]).some((column) => column.name === "analysis_version"))
   db.exec("ALTER TABLE change_analysis ADD COLUMN analysis_version INTEGER NOT NULL DEFAULT 1");
+if (!(db.query("PRAGMA table_info(api_references)").all() as { name: string }[]).some((column) => column.name === "version"))
+  db.exec("ALTER TABLE api_references ADD COLUMN version INTEGER NOT NULL DEFAULT 1");
 
 if (
   !(db.query("PRAGMA table_info(releases)").all() as { name: string }[]).some(
@@ -127,6 +139,9 @@ if (
   )
 )
   db.exec("ALTER TABLE targets ADD COLUMN content_baseline_at INTEGER");
+
+if (!(db.query("PRAGMA table_info(change_analysis)").all() as { name: string }[]).some((column) => column.name === "kind"))
+  db.exec("ALTER TABLE change_analysis ADD COLUMN kind TEXT");
 
 export function ensureCompanySlug(id: string, name: string) {
   const existing = db
@@ -205,6 +220,12 @@ export function recordSnapshot(
       hash(JSON.stringify([company.company_id, company.url, result.evidence])), company.company_id,
       company.url, result.fingerprint, result.evidence, confirmed, confirmed,
     );
+    const deployment = (JSON.parse(result.evidence) as { deployment?: unknown }).deployment;
+    if (typeof deployment === "string")
+      db.query(`INSERT OR IGNORE INTO deploys(company_id,url,deployment,first_seen,baseline)
+        VALUES (?,?,?,?,NOT EXISTS(SELECT 1 FROM deploys WHERE company_id=? AND url=?))`).run(
+        company.company_id, company.url, deployment, confirmed, company.company_id, company.url,
+      );
     const contentTracking = result.fingerprint.startsWith("content-v3:");
     const transitioning = contentTracking && (!company.fingerprint?.startsWith("content-v3:") ||
       (result.captureScope !== undefined && result.captureScope !== company.capture_scope));
@@ -286,11 +307,12 @@ export function recordSnapshot(
   }).immediate();
 }
 
-export function recordFailure(company: Target, message: string) {
+export function recordFailure(company: Target, message: string, retryAfter?: number) {
   const unsupported = /No observable|disallowed/.test(message);
+  const backoff = Math.min(3600, 300 * 2 ** Math.min(company.failures, 4));
   const delay = unsupported
     ? 86400
-    : Math.min(3600, 300 * 2 ** Math.min(company.failures, 4));
+    : retryAfter !== undefined ? Math.max(backoff, retryAfter) : backoff;
   db.query(
     `UPDATE targets SET last_check=?,checks=checks+1,failures=failures+1,
     status=?,error=?,candidate=NULL,candidate_at=NULL,previous_success=NULL,next_check=? WHERE id=?`,

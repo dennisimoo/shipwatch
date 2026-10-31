@@ -198,3 +198,19 @@ test("YC sync retains only the selected year's active companies and preserves co
     db.query("SELECT id FROM companies WHERE id='yc-2'").get(),
   ).not.toBeNull();
 });
+
+test("deploy IDs count new deployments after the first, once each", () => {
+  const record = (deployment: string, at: number) => recordSnapshot(company(), {
+    fingerprint: "content-v3:same", assets: {}, evidence: JSON.stringify({ deployment }),
+  }, at);
+  record("dpl_first", 1000);
+  record("dpl_second", 1300);
+  record("dpl_first", 1600);
+  record("dpl_third", 1900);
+  expect(db.query("SELECT deployment,baseline FROM deploys WHERE company_id='test' ORDER BY first_seen").all()).toEqual([
+    { deployment: "dpl_first", baseline: 1 },
+    { deployment: "dpl_second", baseline: 0 },
+    { deployment: "dpl_third", baseline: 0 },
+  ]);
+  expect(count()).toBe(0);
+});

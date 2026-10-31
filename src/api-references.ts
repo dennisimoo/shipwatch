@@ -2,18 +2,26 @@ import { gunzipSync } from "node:zlib";
 import { db } from "./db";
 import { apiSchema, sameSite } from "./network";
 
-interface Reference {
+export interface Reference {
   url: string;
+  type?: string;
   method: string;
   queryParams: string[];
   bodyParams: string[];
 }
 interface Evidence {
   content: { url: string; hash: string }[];
+  missing?: string[];
+  uninspected?: string[];
 }
+const extractionVersion = 2;
+const navigationTypes = /^(?:locationAssignment|locationReplacement|window\.open|location\.href)$/;
+const requestReference = (entry: Pick<Reference, "method" | "type">) =>
+  !navigationTypes.test(entry.type ?? "") &&
+  (!!entry.method || entry.type === "fetch" || /^axios\./.test(entry.type ?? ""));
 
-async function extract(digest: string): Promise<Reference[]> {
-  const cached = db.query("SELECT entries FROM api_references WHERE hash=?").get(digest) as { entries: string } | null;
+export async function extract(digest: string): Promise<Reference[]> {
+  const cached = db.query("SELECT entries FROM api_references WHERE hash=? AND version=?").get(digest, extractionVersion) as { entries: string } | null;
   if (cached) return JSON.parse(cached.entries);
   const row = db.query("SELECT body FROM bundle_bodies WHERE hash=?").get(digest) as { body: Uint8Array } | null;
   if (!row) throw new Error("API reference source was not archived");
@@ -35,16 +43,18 @@ async function extract(digest: string): Promise<Reference[]> {
     const entries = output.trim() ? output.trim().split("\n").map((line) => JSON.parse(line)) : [];
     const references: Reference[] = entries.filter((entry) =>
       typeof entry.url === "string" && typeof entry.method === "string" &&
-      (entry.method || entry.type === "fetch" || /^axios\./.test(String(entry.type))) &&
+      (requestReference(entry) || navigationTypes.test(String(entry.type))) &&
       Array.isArray(entry.queryParams) && Array.isArray(entry.bodyParams),
-    ).map((entry) => ({ url: entry.url, method: entry.method.toUpperCase() ||
+    ).map((entry) => ({ url: entry.url, type: typeof entry.type === "string" ? entry.type : undefined, method: entry.method.toUpperCase() ||
       /^axios\.(get|post|put|patch|delete|head|options)$/.exec(String(entry.type))?.[1].toUpperCase() || "",
       queryParams: entry.queryParams.filter((value: unknown) => typeof value === "string"),
       bodyParams: entry.bodyParams.filter((value: unknown) => typeof value === "string"),
     }));
-    const explicitMethods = new Set(references.filter((entry) => entry.method).map((entry) => entry.url));
-    const distinct = references.filter((entry) => entry.method || !explicitMethods.has(entry.url));
-    db.query("INSERT OR IGNORE INTO api_references(hash,entries) VALUES (?,?)").run(digest, JSON.stringify(distinct));
+    const explicitMethods = new Set(references.filter((entry) => requestReference(entry) && entry.method).map((entry) => entry.url));
+    const distinct = references.filter((entry) => !requestReference(entry) || entry.method || !explicitMethods.has(entry.url));
+    db.query(`INSERT INTO api_references(hash,entries,version) VALUES (?,?,?)
+      ON CONFLICT(hash) DO UPDATE SET entries=excluded.entries,version=excluded.version`)
+      .run(digest, JSON.stringify(distinct), extractionVersion);
     return distinct;
   } finally {
     clearTimeout(deadline);
@@ -60,6 +70,7 @@ export async function apiChanges(before: Evidence, after: Evidence, pageUrl: str
       if (Date.now() >= deadline) throw new Error("API extraction exceeded comparison deadline");
       if (/\.css(?:\?|$)/.test(asset.url)) continue;
       for (const entry of await extract(asset.hash)) {
+        if (!requestReference(entry)) continue;
         let target: URL;
         try { target = new URL(entry.url, pageUrl); } catch { continue; }
         if (!["https:", "http:"].includes(target.protocol) || target.username || target.password || !sameSite(pageUrl, target.href)) continue;
@@ -72,9 +83,14 @@ export async function apiChanges(before: Evidence, after: Evidence, pageUrl: str
   };
   const previous = await inventory(before);
   const current = await inventory(after);
-  const added = [...current].filter((entry) => !previous.has(entry)).sort();
-  const removed = [...previous].filter((entry) => !current.has(entry)).sort();
+  const availableAdded = [...current].filter((entry) => !previous.has(entry)).sort();
+  const availableRemoved = [...previous].filter((entry) => !current.has(entry)).sort();
+  const previousUnavailable = !!(before.missing?.length || before.uninspected?.length);
+  const currentUnavailable = !!(after.missing?.length || after.uninspected?.length);
+  const added = previousUnavailable ? [] : availableAdded;
+  const removed = currentUnavailable ? [] : availableRemoved;
   return { added: added.slice(0, 100).map((entry) => JSON.parse(entry)),
     removed: removed.slice(0, 100).map((entry) => JSON.parse(entry)),
-    truncated: added.length > 100 || removed.length > 100 };
+    truncated: added.length > 100 || removed.length > 100 || added.length !== availableAdded.length || removed.length !== availableRemoved.length,
+    ...(previousUnavailable || currentUnavailable ? { incomplete: true } : {}) };
 }

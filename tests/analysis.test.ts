@@ -33,13 +33,13 @@ test("one structured Luna call returns both fields and guards incomplete evidenc
     expect(input.store).toBe(false);
     expect(input.instructions).toContain("nontechnical reader");
     expect(input.instructions).toContain("not just visual changes");
-    expect(input.text.format.schema.required).toEqual(["classification", "summary"]);
+    expect(input.text.format.schema.required).toEqual(["classification", "kind", "summary"]);
     calls++;
     return Response.json({ id: "test", object: "response", status: "completed", output: [{ type: "message", role: "assistant",
-      content: [{ type: "output_text", text: JSON.stringify({ classification: "build-only", summary: "Only module identifiers changed." }), annotations: [] }] }] });
+      content: [{ type: "output_text", text: JSON.stringify({ classification: "build-only", kind: "other", summary: "Only module identifiers changed." }), annotations: [] }] }] });
   } });
   const result = await classifyChange({ patch: "module 1 -> module 2", unseenChanged: false }, client);
-  expect(result).toEqual({ classification: "build-only", summary: "Only module identifiers changed." });
+  expect(result).toEqual({ classification: "build-only", kind: "other", summary: "Only module identifiers changed." });
   expect((await classifyChange({ patch: "module 1 -> module 2", unseenChanged: true }, client)).classification).toBe("uncertain");
   await classifyChange({ patch: "", unseenChanged: false }, client);
   expect(calls).toBe(2);
@@ -148,4 +148,51 @@ test("unsupported loader syntax retains other evidence and marks the comparison 
     expect(result.unseenChanged).toBe(true);
     expect(result.reasons).toContain("Runtime loader syntax could not be inspected");
   } finally { inspect.mockRestore(); }
+});
+
+test("summaries with code identifiers get one plain-language rewrite", async () => {
+  const replies = ["Both cleanup paths now schedule `TO` to run in a microtask.", "Closing a panel now cleans up more reliably."];
+  let calls = 0;
+  const client = new OpenAI({ apiKey: "test", fetch: async (_url, request) => {
+    const input = JSON.parse(String(request?.body));
+    if (calls) expect(input.instructions).toContain("Rewrite it in everyday words");
+    const text = JSON.stringify({ classification: "application", kind: "fix", summary: replies[calls++] });
+    return Response.json({ id: "test", object: "response", status: "completed", output: [{ type: "message", role: "assistant",
+      content: [{ type: "output_text", text, annotations: [] }] }] });
+  } });
+  expect(await classifyChange({ patch: "a -> b", unseenChanged: false }, client))
+    .toEqual({ classification: "application", kind: "fix", summary: "Closing a panel now cleans up more reliably." });
+  expect(calls).toBe(2);
+});
+
+test("plain summaries pass the jargon check", async () => {
+  const { technicalSummary } = await import("../src/analysis");
+  expect(technicalSummary("The pricing page adds a yearly plan option.")).toBe(false);
+  expect(technicalSummary("Theme initialization now treats `/network/` routes as marketing pages.")).toBe(true);
+  expect(technicalSummary("Adds a useFeatureFlag check before checkout.")).toBe(true);
+  expect(technicalSummary("Calls /api/brands before loading.")).toBe(true);
+  expect(technicalSummary("Adds Chinese and Japanese translations for the network pages.")).toBe(false);
+});
+
+test("unavailable and recovered scripts are not mistaken for removed or added features", async () => {
+  const stable = evidence("const home=true;", "https://example.com/home.js");
+  const checkout = evidence("const checkoutEnabled=true;", "https://example.com/checkout.js");
+  const complete = { content: [...stable.content, ...checkout.content] };
+  for (const missing of [checkout.content[0].url, "https://example.com/checkout-new-hash.js"]) {
+    const unavailable = { ...stable, missing: [missing] };
+    const removed = comparison(complete, unavailable);
+    expect(removed.unseenChanged).toBe(true);
+    expect(removed.patch).toBe("");
+    expect((await classifyChange(removed)).classification).toBe("uncertain");
+    const recovered = comparison(unavailable, complete);
+    expect(recovered.unseenChanged).toBe(true);
+    expect(recovered.patch).toBe("");
+  }
+  const capped = comparison(complete, { ...stable, uninspected: [checkout.content[0].url] });
+  expect(capped.unseenChanged).toBe(true);
+  expect(capped.patch).toBe("");
+  const changed = comparison(complete, { ...evidence("const home=false;", stable.content[0].url), missing: [checkout.content[0].url] });
+  expect(changed.unseenChanged).toBe(true);
+  expect(changed.patch).toContain("home = false");
+  expect(changed.patch).not.toContain("checkoutEnabled");
 });

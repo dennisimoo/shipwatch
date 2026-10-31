@@ -22,6 +22,7 @@ Watch public JavaScript bundles every five minutes and see which websites change
 - **When they ship:** interactive per-website release graphs and hourly/daily views in your local time.
 - **Share a website:** readable `/company/:slug` pages with release history and a copy-link control.
 - **Show the evidence:** each company has its baseline date, check history, and release fingerprints.
+- **See how a site talks to servers:** a diagram of the pages, API routes, and outside services (payments, sign-in, analytics, AI) referenced in its captured code.
 - **Bring a website:** discover subdomains, review Luna's suggestions, and check the URLs you want to monitor.
 
 **Any public website can join.** The prefilled starter dataset is **797 active/public companies from YC's Winter, Spring, Summer, and Fall 2026 batches**. Older companies aren't kept in a separate directory. New sites start with a baseline; history fills in as the observer runs.
@@ -92,7 +93,17 @@ Luna returns `classification` (`application`, `build-only`, or `uncertain`) and 
 
 Full downloaded bundles are retained, not just the snippets sent to Luna. Each distinct capture keeps its URLs, raw hashes, and first/last observation times, including metadata-only versions. Compression and content-addressed storage avoid duplicate bodies without discarding code. Capture is still bounded by the fetch budget; unvisited routes are not magically archived. Future summaries use short, nontechnical language and can describe API/client logic or shared code, but cannot prove an unseen backend deployment.
 
-Sibling assets such as `app.example.com` loading `cdn.example.com` are included within the same registrable domain; unrelated tenants and domains are excluded. Jsluice extracts API request references from archived JavaScript once per raw hash. Before/after comparisons include first-party endpoint paths, methods, and parameter names, with query values and headers omitted. Each extraction has a ten-second deadline; the comparison has a bounded time budget and sends at most 100 added and 100 removed references to Luna. Failures are logged and passed to the model as incomplete coverage, not empty results. These are changes in client references, not proof an endpoint was created or deleted on the server. Public OpenAPI/Swagger URLs can also be monitored directly: captured schema changes use the same confirmation and classification flow. Arbitrary API data and health-response timestamps are not counted as deployments.
+Sibling assets such as `app.example.com` loading `cdn.example.com` are included within the same registrable domain; unrelated tenants and domains are excluded. Site-builder CDNs are the exception: Framer `framerusercontent.com/sites/<id>/` and Webflow `website-files.com/<site-id>/js/` paths count as first-party only for the site ID the page itself loads. Chunks that return 404 or an HTML fallback are recorded as missing instead of failing the check; past the byte budget, remaining chunks are left uninspected. Jsluice extracts API request references from archived JavaScript once per raw hash. Before/after comparisons include first-party endpoint paths, methods, and parameter names, with query values and headers omitted. Each extraction has a ten-second deadline; the comparison has a bounded time budget and sends at most 100 added and 100 removed references to Luna. Failures are logged and passed to the model as incomplete coverage, not empty results. These are changes in client references, not proof an endpoint was created or deleted on the server. Public OpenAPI/Swagger URLs can also be monitored directly: captured schema changes use the same confirmation and classification flow. Arbitrary API data and health-response timestamps are not counted as deployments.
+
+**Change kinds.** Application changes also get a kind: `feature`, `fix`, `content`, `design`, `api`, or `other`. Summaries that read like code (backticks, camelCase, file paths) are rewritten once in everyday words.
+
+**Platform deploys.** Vercel `dpl_` deployment IDs (or a Next.js `buildId`) are counted separately as "Deploys, 30 days". A redeploy with identical code is a deploy, not a release, and never enters rankings.
+
+**Before Shipwatch.** `bun run backfill:wayback --company=<slug> [--since=YYYYMMDD] [--max=40] [--apply]` reads Wayback Machine copies of a monitored page (one request every 1.5 seconds) and stores distinct builds in `archived_builds`. Archive coverage is sparse, so profiles show this as a lower bound, separate from releases.
+
+**Backend map.** `GET /api/company/:slug/backend` combines jsluice output from the latest captured scripts with hand-written host and SDK rules for about 55 services, Next.js route manifests, GraphQL operation names, WebSocket URLs, Next.js server action names, and (when the Supabase SDK is present) the tables, database functions, and storage buckets its client calls name. It is cached per capture, with at most two builds running at once. Extraction caches are versioned so older records without request types are rebuilt. It lists requests the browser code can make; it does not request them, prove they are live, or show what the server does.
+
+Missing scripts are incomplete evidence, not deleted features or endpoints. Newly recovered scripts are not automatically new features either. Unavailable-code additions/removals are withheld from summaries, while independently captured changes remain usable. Cached and revalidated assets spend the same decoded-byte budget as downloaded assets: 20 MB per page, 5 MB per asset, up to 128 assets. Builder scope stays expanded once adopted, even across consecutive captures without CDN scripts.
 
 Expanding capture scope establishes a fresh fingerprint baseline on the next successful check, without adding a release or deleting existing history. Subsequent changes use the normal confirmation flow.
 
@@ -123,7 +134,7 @@ The interface is plain HTML, CSS, and a small browser script. It pairs self-host
 | Bounded discovery concurrency     | `p-limit`                                         |
 | HTTPS                             | Caddy                                             |
 
-The observer spreads checks across five-minute windows, limits concurrent work, and backs off failures. It does not consult robots.txt. Private and reserved destinations are blocked, DNS is pinned to the validated address, and fetches have byte/time limits. Slow or unobservable sites show their actual monitoring status.
+The observer spreads checks across five-minute windows, limits concurrent work, and backs off failures. It does not consult robots.txt. Fetches request Brotli/gzip; hashed assets with long-lived cache headers can be reused for a day without a request. Requests to one host are paced, with one check per registrable domain at a time. Rate limits, retry requests, and Cloudflare challenges trigger backoff rather than becoming content. Private and reserved destinations are blocked, DNS is pinned to the validated address, and decoded responses have byte/time limits. Slow or unobservable sites show their actual monitoring status.
 
 Submission limits: **one per IP per minute**, **100 new sites per day**. Read APIs: **120 requests per IP per minute**. In-memory limits reset on restart; there's no Redis or distributed rate-limit service.
 
@@ -141,6 +152,8 @@ src/
   subdomains.ts  Cached passive Subfinder discovery
   analysis.ts    Compressed bundles, code diffs, Luna summaries
   api-references.ts  Cached jsluice request-reference comparisons
+  backend-map.ts Endpoint, service, and route map for a site's captured code
+  backfill-wayback.ts  Opt-in archived-build backfill
   server.ts      Website and API
 public/          Responsive website
 tests/           Detection, safety boundary, and lifecycle checks
@@ -166,6 +179,7 @@ deploy/          EC2 service, HTTPS setup, daily SQLite backup
 | `GET /api/summary`           | Counts, coverage, activity, batches, UTC heatmap                                                 |
 | `GET /api/companies`         | Leaderboard; accepts `days`, `sort`, `batch`, `search`, `page`                                   |
 | `GET /api/company/:slug`     | Profile, up to 100 release events, daily check totals                                            |
+| `GET /api/company/:slug/backend` | Pages, API routes, outside services, and GraphQL/WebSocket references from captured code     |
 | `GET /api/discovery-options` | Discovery availability; limits cannot be changed here                                            |
 | `POST /api/discover`         | Review `{ "url": "https://example.com", "name": "Example" }`; returns a 30-minute review token   |
 | `POST /api/companies`        | Confirm `{ "token": "review-token", "selected": ["https://app.example.com/"] }` from that review |
