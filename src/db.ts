@@ -57,6 +57,9 @@ db.exec(`
     url TEXT NOT NULL, fingerprint TEXT NOT NULL, evidence TEXT NOT NULL,
     first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS analysis_parts (
+    input_hash TEXT PRIMARY KEY, result TEXT NOT NULL, created_at INTEGER NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS ai_usage (
     id INTEGER PRIMARY KEY, task TEXT NOT NULL, model TEXT NOT NULL, usage TEXT NOT NULL, created_at INTEGER NOT NULL
   );
