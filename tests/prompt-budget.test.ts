@@ -166,3 +166,15 @@ test("a whole paired checkout change survives unrelated incomplete coverage and 
   expect(classified.classification).toBe("application");
   expect(classified.summary).toContain("checkout");
 });
+
+test("a valid verbose report retains its late facts through reconciliation", async () => {
+  const details = "observed context ".repeat(350) + "Checkout becomes enabled at the final paired line.";
+  const client = aiFixture((request) => {
+    const data = JSON.parse(String(request.messages[0].content));
+    if (data.evidence) return { ...result("uncertain"), details };
+    expect(data.reports.every((report: { details: string }) => report.details === details)).toBe(true);
+    return result("application");
+  }, count);
+  const chunks = ["verbose-first", "verbose-second"].map((oldFile) => ({ oldFile, characterEdit: { before: "", after: "z".repeat(50000) } }));
+  expect((await classifyChange({ patch: patch(chunks), unseenChanged: false }, client)).classification).toBe("application");
+});

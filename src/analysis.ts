@@ -183,7 +183,7 @@ export async function classifyChange(input: ReturnType<typeof comparison> & { ap
       const raw = cached ? JSON.parse(cached.result)
         : (await requestJson("analysis-part", partInstructions, part, partSchema, client)).data;
       const details = (raw as { details?: unknown })?.details;
-      if (typeof details !== "string" || !details.trim() || details.length > 4000) throw new AIReplyError("Invalid part evidence report");
+      if (typeof details !== "string" || !details.trim()) throw new AIReplyError("Invalid part evidence report");
       const result = { ...validate(raw), details };
       if (!cached) db.query("INSERT OR IGNORE INTO analysis_parts VALUES (?,?,?)").run(key, JSON.stringify(result), now());
       results.push(result);
