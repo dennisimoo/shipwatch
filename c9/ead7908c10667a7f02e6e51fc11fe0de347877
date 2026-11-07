@@ -1,0 +1,26 @@
+README.md
+  s_430b911825d83f::t_d1effda99ab4c9 90
+  s_430b911825d83f::t_d537822650fa1c 51
+src/analysis.ts
+  s_430b911825d83f::t_d1effda99ab4c9 186
+docs/prompt-token-budget.md
+  s_430b911825d83f::t_d537822650fa1c 11
+tests/prompt-budget.test.ts
+  s_430b911825d83f::t_d1effda99ab4c9 169-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c9ead7908c10667a7f02e6e51fc11fe0de347877",
+  "prompts": {},
+  "sessions": {
+    "s_430b911825d83f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b3ef-377d-7431-8baa-62dc78564cc2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "randomperson12344 <4dennisk@gmail.com>"
+    }
+  }
+}
