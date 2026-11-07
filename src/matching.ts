@@ -1,3 +1,4 @@
+import { tokenizer } from "acorn";
 import { assetIdentity, hash } from "./detect";
 
 export interface BundleEntry { url: string; hash: string }
@@ -22,6 +23,23 @@ function stableIdentity(entry: BundleEntry): string {
     /\/_next\/static\/(?:immutable\/)?chunks\/(?=[\w-]*\d)[\w-]{12,64}\.js$/.test(original.pathname) &&
     !/\/(?:\d+|[A-Za-z][A-Za-z_-]*)[-.][a-f0-9]{8,}\.js$/i.test(original.pathname)) return canonicalUrl(entry.url);
   return url.href;
+}
+
+/** Used only to pair renamed files. Original source still supplies every diff character. */
+function structure(source: string): Set<string> {
+  if (source.length > 2_000_000) return new Set();
+  try {
+    const tokens: string[] = [];
+    for (const token of tokenizer(source, { ecmaVersion: "latest", sourceType: "module" })) {
+      if (tokens.length >= 100000) return new Set();
+      tokens.push(token.type.label === "name" ? "identifier" : JSON.stringify([token.type.label, "value" in token ? token.value : undefined]));
+    }
+    if (tokens.length < 24) return new Set();
+    const windows = new Set<string>();
+    for (let index = 0; index + 8 <= tokens.length; index++)
+      windows.add(hash(JSON.stringify(tokens.slice(index, index + 8))));
+    return windows;
+  } catch { return new Set(); }
 }
 
 export function pairBundles(before: BundleEntry[], after: BundleEntry[], source: (entry: BundleEntry) => string) {
@@ -68,7 +86,7 @@ export function pairBundles(before: BundleEntry[], after: BundleEntry[], source:
       const window = lines.slice(index, index + 3).join("\n");
       if (window.length >= 30) shingles.add(hash(window));
     }
-    return [entry, { lines: new Set(lines.filter((line) => line.length >= 30)), shingles }] as const;
+    return [entry, { structure: structure(source(entry)), lines: new Set(lines.filter((line) => line.length >= 30)), shingles }] as const;
   }));
   const similarity = (oldLines: Set<string>, newLines: Set<string>) => {
     let common = 0;
@@ -83,7 +101,7 @@ export function pairBundles(before: BundleEntry[], after: BundleEntry[], source:
     const oldSignature = signatures.get(old)!;
     const newSignature = signatures.get(next)!;
     candidates.push({ old, next, score: Math.max(similarity(oldSignature.lines, newSignature.lines),
-      similarity(oldSignature.shingles, newSignature.shingles)) });
+      similarity(oldSignature.shingles, newSignature.shingles), similarity(oldSignature.structure, newSignature.structure)) });
   }
   candidates.sort((left, right) => right.score - left.score);
   const byOld = group(candidates, (candidate) => canonicalUrl(candidate.old.url));

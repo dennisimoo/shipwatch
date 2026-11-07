@@ -57,6 +57,9 @@ db.exec(`
     url TEXT NOT NULL, fingerprint TEXT NOT NULL, evidence TEXT NOT NULL,
     first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS ai_usage (
+    id INTEGER PRIMARY KEY, task TEXT NOT NULL, model TEXT NOT NULL, usage TEXT NOT NULL, created_at INTEGER NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS change_analysis (
     release_id INTEGER PRIMARY KEY REFERENCES releases(id) ON DELETE CASCADE,
     before_fingerprint TEXT, classification TEXT CHECK(classification IN ('application','build-only','uncertain')),

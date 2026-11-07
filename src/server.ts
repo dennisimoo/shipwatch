@@ -11,7 +11,8 @@ import { normalizeUrl } from "./network";
 import { hash } from "./detect";
 import { backendMap } from "./backend-map";
 import { RateLimiterMemory, RateLimiterRes } from "rate-limiter-flexible";
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
+import { AIReplyError } from "./ai";
 import {
   applyTargets,
   discover,
@@ -186,7 +187,7 @@ const server = Bun.serve({
         return json(cached("summary", summary));
       if (request.method === "GET" && url.pathname === "/api/discovery-options")
         return json({
-          available: Boolean(process.env.OPENAI_API_KEY),
+          available: Boolean(process.env.ANTHROPIC_API_KEY),
         });
       if (request.method === "GET" && url.pathname === "/api/companies")
         return json(cached(url.href, () => leaderboard(url)));
@@ -461,10 +462,12 @@ const server = Bun.serve({
         },
       );
     } catch (error) {
-      if (error instanceof OpenAI.APIError)
+      if (error instanceof Anthropic.APIError || error instanceof AIReplyError)
         return json(
           {
-            error: `Website review failed (HTTP ${error.status || "unknown"}). Please try again later.`,
+            error: error instanceof Anthropic.APIError
+              ? `Website review failed (HTTP ${error.status || "unknown"}). Please try again later.`
+              : "Website review could not complete. Please try again later.",
           },
           502,
         );
@@ -504,3 +507,5 @@ if (process.env.POLL_ENABLED !== "0") {
   startPolling();
   startDiscovery();
 }
+
+export default server;

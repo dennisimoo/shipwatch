@@ -171,7 +171,7 @@
             <p>
               The first successful check establishes a baseline. A different
               content fingerprint must persist on a follow-up check before we record it.
-              Deployment IDs, known Sentry debug metadata, and hashed asset references do not count by themselves.
+              Deployment IDs, known Sentry debug metadata, injected PostHog IDs, and hashed asset references do not count by themselves.
               Multiple changes within the same five-minute interval count once per website.
               Previously seen fingerprints and rollbacks don't add to the count.
             </p>
@@ -211,7 +211,7 @@
           with a 20 MB response budget. Conditional requests reuse unchanged content.
           Uninspected routes and third-party CDN assets can be missed. Older deployment-based
           observations are excluded unless their historical content can be reverified.
-          Luna classifies code differences and summarizes application changes. Build-only,
+          Claude classifies code differences and summarizes application changes. Build-only,
           uncertain, and unclassified observations are excluded from public histories.
           AI classifications can be wrong.
         </p>

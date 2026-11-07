@@ -52,7 +52,7 @@ export async function checkCompany(company: Target) {
 export function startPolling() {
   let analyzing = false;
   const tick = () => {
-    if (!analyzing && process.env.OPENAI_API_KEY) {
+    if (!analyzing && process.env.ANTHROPIC_API_KEY) {
       analyzing = true;
       void analyzeNext().catch((error) => console.error("analysis", error.message))
         .finally(() => { analyzing = false; });
