@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import OpenAI from "openai";
+import { aiFixture } from "./ai-fixture";
 import { gunzipSync } from "node:zlib";
 import * as runtime from "../src/runtime";
 
@@ -25,24 +25,23 @@ test("unchanged and normalized metadata avoid model calls; real code produces a 
   expect(comparison(before, { content: [...before.content, ...before.content] }).unseenChanged).toBe(true);
 });
 
-test("one structured Luna call returns both fields and guards incomplete evidence", async () => {
+test("one structured Claude call returns both fields and guards incomplete evidence", async () => {
   let calls = 0;
-  const client = new OpenAI({ apiKey: "test", fetch: async (_url, request) => {
-    const input = JSON.parse(String(request?.body));
-    expect(input.model).toBe("gpt-6-luna");
-    expect(input.store).toBe(false);
-    expect(input.instructions).toContain("nontechnical reader");
-    expect(input.instructions).toContain("not just visual changes");
-    expect(input.text.format.schema.required).toEqual(["classification", "kind", "summary"]);
+  const initial = (db.query("SELECT count(*) n FROM ai_usage WHERE task='analysis'").get() as { n: number }).n;
+  const client = aiFixture((request) => {
+    expect(request.model).toBe("claude-haiku-5-5");
+    const payload = JSON.parse(String(request.messages[0].content));
+    expect(payload.patch).toEqual([{ before: 1, after: 2 }]);
     calls++;
-    return Response.json({ id: "test", object: "response", status: "completed", output: [{ type: "message", role: "assistant",
-      content: [{ type: "output_text", text: JSON.stringify({ classification: "build-only", kind: "other", summary: "Only module identifiers changed." }), annotations: [] }] }] });
-  } });
-  const result = await classifyChange({ patch: "module 1 -> module 2", unseenChanged: false }, client);
-  expect(result).toEqual({ classification: "build-only", kind: "other", summary: "Only module identifiers changed." });
-  expect((await classifyChange({ patch: "module 1 -> module 2", unseenChanged: true }, client)).classification).toBe("uncertain");
+    return { classification: "build-only", kind: "other", summary: "Only module identifiers changed." };
+  });
+  const input = { patch: '{"before":1,"after":2}\n', unseenChanged: false };
+  expect(await classifyChange(input, client))
+    .toEqual({ classification: "build-only", kind: "other", summary: "Only module identifiers changed." });
+  expect((await classifyChange({ ...input, unseenChanged: true }, client)).classification).toBe("uncertain");
   await classifyChange({ patch: "", unseenChanged: false }, client);
   expect(calls).toBe(2);
+  expect(db.query("SELECT count(*) n FROM ai_usage WHERE task='analysis'").get()).toEqual({ n: initial + 2 });
 });
 
 test("confirmed changes queue once, preserve history, and count only application changes", async () => {
@@ -153,14 +152,15 @@ test("unsupported loader syntax retains other evidence and marks the comparison 
 test("summaries with code identifiers get one plain-language rewrite", async () => {
   const replies = ["Both cleanup paths now schedule `TO` to run in a microtask.", "Closing a panel now cleans up more reliably."];
   let calls = 0;
-  const client = new OpenAI({ apiKey: "test", fetch: async (_url, request) => {
-    const input = JSON.parse(String(request?.body));
-    if (calls) expect(input.instructions).toContain("Rewrite it in everyday words");
-    const text = JSON.stringify({ classification: "application", kind: "fix", summary: replies[calls++] });
-    return Response.json({ id: "test", object: "response", status: "completed", output: [{ type: "message", role: "assistant",
-      content: [{ type: "output_text", text, annotations: [] }] }] });
-  } });
-  expect(await classifyChange({ patch: "a -> b", unseenChanged: false }, client))
+  const client = aiFixture((input) => {
+    const payload = JSON.parse(String(input.messages[0].content));
+    if (calls) {
+      expect(payload).toEqual({ summary: replies[0] });
+      expect(payload.patch).toBeUndefined();
+    }
+    return calls++ ? { summary: replies[1] } : { classification: "application", kind: "fix", summary: replies[0] };
+  });
+  expect(await classifyChange({ patch: '{"before":"a","after":"b"}\n', unseenChanged: false }, client))
     .toEqual({ classification: "application", kind: "fix", summary: "Closing a panel now cleans up more reliably." });
   expect(calls).toBe(2);
 });
@@ -195,4 +195,54 @@ test("unavailable and recovered scripts are not mistaken for removed or added fe
   expect(changed.unseenChanged).toBe(true);
   expect(changed.patch).toContain("home = false");
   expect(changed.patch).not.toContain("checkoutEnabled");
+});
+
+test("SDK metadata is local, while mixed feature changes and incomplete captures stay visible", async () => {
+  const sdk = (id: string, feature = false) => `configure({ integrations: [{name:"NextjsClientStackFrameNormalization"}], release:"${id}" }); const feature=${feature};`;
+  const before = evidence(sdk("a".repeat(40)));
+  const metadata = comparison(before, evidence(sdk("b".repeat(40))));
+  expect(metadata.patch).toBe("");
+  expect((await classifyChange(metadata)).classification).toBe("build-only");
+  expect(comparison(before, evidence(sdk("b".repeat(40), true))).patch).toContain("feature = true");
+  const incomplete = comparison(before, { ...evidence(sdk("b".repeat(40))), missing: ["https://example.com/unknown.js"] });
+  expect((await classifyChange(incomplete)).classification).toBe("uncertain");
+});
+
+test("renamed bundles with minifier churn retain real edits and avoid whole-file additions", () => {
+  const source = (name: string, enabled: boolean) => Array.from({ length: 100 }, (_, n) =>
+    `function ${name}${n}(${name}){ return ${name}.value + ${n}; }`).join("\n") + `\nconst enabled=${enabled};`;
+  const before = evidence(source("alpha", false), "https://example.com/_next/static/chunks/123456abcdef.js");
+  const after = evidence(source("beta", true), "https://example.com/_next/static/chunks/abcdef123456.js");
+  const result = comparison(before, after);
+  expect(result.unseenChanged).toBe(false);
+  expect(result.patch).toContain("enabled = true");
+  expect(result.patch).toContain("alpha");
+  expect(result.patch).toContain("beta");
+});
+
+test("a failed wording rewrite keeps the original classification without reanalyzing code", async () => {
+  let calls = 0;
+  const client = aiFixture(() => {
+    if (calls++) return { summary: null };
+    return { classification: "application", kind: "fix", summary: "The useFeatureFlag check now runs before checkout." };
+  });
+  const result = await classifyChange({ patch: '{"before":false,"after":true}\n', unseenChanged: false }, client);
+  expect(result.classification).toBe("application");
+  expect(result.kind).toBe("fix");
+  expect(calls).toBe(2);
+});
+
+test("structurally identical anonymous candidates stay ambiguous rather than hiding either file", () => {
+  const source = (prefix: string) => Array.from({ length: 30 }, (_, n) => `function ${prefix}${n}(value){return value.field+${n};}`).join("\n");
+  const before = { content: [
+    ...evidence(source("alpha"), "https://example.com/_next/static/chunks/111111abcdef.js").content,
+    ...evidence(source("beta"), "https://example.com/_next/static/chunks/222222abcdef.js").content,
+  ] };
+  const after = { content: [
+    ...evidence(source("gamma"), "https://example.com/_next/static/chunks/333333abcdef.js").content,
+    ...evidence(source("delta"), "https://example.com/_next/static/chunks/444444abcdef.js").content,
+  ] };
+  const result = comparison(before, after);
+  expect(result.unseenChanged).toBe(true);
+  for (const name of ["alpha", "beta", "gamma", "delta"]) expect(result.patch).toContain(name);
 });

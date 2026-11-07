@@ -66,12 +66,14 @@ function characterEdits(oldFile: string, newFile: string, before: string, after:
       if (changed.removed) removed += changed.value;
       else added += changed.value;
     }
+    const oldPreceding = before.slice(Math.max(0, oldOffset - 160), oldOffset);
+    const newPreceding = after.slice(Math.max(0, newOffset - 160), newOffset);
+    const oldFollowing = before.slice(oldOffset + removed.length, oldOffset + removed.length + 160);
+    const newFollowing = after.slice(newOffset + added.length, newOffset + added.length + 160);
     chunks.push(JSON.stringify({ oldFile, newFile, characterEdit: {
       oldOffset: oldBase + oldOffset, newOffset: newBase + newOffset, before: removed, after: added,
-      oldPreceding: before.slice(Math.max(0, oldOffset - 160), oldOffset),
-      oldFollowing: before.slice(oldOffset + removed.length, oldOffset + removed.length + 160),
-      newPreceding: after.slice(Math.max(0, newOffset - 160), newOffset),
-      newFollowing: after.slice(newOffset + added.length, newOffset + added.length + 160),
+      ...(oldPreceding === newPreceding ? { preceding: oldPreceding } : { oldPreceding, newPreceding }),
+      ...(oldFollowing === newFollowing ? { following: oldFollowing } : { oldFollowing, newFollowing }),
     } }) + "\n");
     oldOffset += removed.length;
     newOffset += added.length;

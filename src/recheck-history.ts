@@ -103,7 +103,7 @@ if (import.meta.main) {
   if (analyze && process.argv.includes("--apply")) {
     db.query(`INSERT OR IGNORE INTO change_analysis(release_id)
       SELECT id FROM bundle_releases WHERE (? IS NULL OR company_id=?)`).run(companyId, companyId);
-    if (process.env.OPENAI_API_KEY) while (await analyzeNext()) {}
+    if (process.env.ANTHROPIC_API_KEY) while (await analyzeNext()) {}
   }
   console.log(JSON.stringify({ apply: process.argv.includes("--apply"), companies: reports.length,
     records: reports.reduce((total, report) => total + report.records, 0),

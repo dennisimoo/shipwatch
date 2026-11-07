@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import OpenAI from "openai";
+import { aiFixture } from "./ai-fixture";
 import { spyOn } from "bun:test";
 import * as network from "../src/network";
 
@@ -50,10 +50,7 @@ test("discovery accepts same-site redirects and constrains fallback fetches", as
 
 test("host shortlisting respects the inspection budget and rejects invented hosts", async () => {
   let responseHosts = ["app.acme.com", "api.acme.com"];
-  const client = new OpenAI({ apiKey: "test", fetch: async () => Response.json({
-    id: "test", object: "response", status: "completed", output: [{ type: "message", role: "assistant",
-      content: [{ type: "output_text", text: JSON.stringify({ hosts: responseHosts }), annotations: [] }] }],
-  }) });
+  const client = aiFixture(() => ({ hosts: responseHosts }));
   const hosts = ["aaa.acme.com", "app.acme.com", "api.acme.com", "test.acme.com"];
   expect(await shortlist(hosts, "https://acme.com", 2, client)).toEqual(responseHosts);
   expect(await shortlist(hosts, "https://acme.com", 0, client)).toEqual([]);
@@ -97,7 +94,7 @@ test("discovery reads page context without using homepage links as subdomain dis
   expect(page.text).not.toContain("secretNoise");
 });
 
-test("Luna suggestions are capped, while a user can override an inspectable suggestion", () => {
+test("AI suggestions are capped, while a user can override an inspectable suggestion", () => {
   const candidates = [
     {
       url: "https://acme.com/",
@@ -170,4 +167,31 @@ test("Luna suggestions are capped, while a user can override an inspectable sugg
       "https://fourth.acme.com/",
     ]),
   ).toThrow();
+});
+
+test("Claude recommendation scores retain runtime bounds and candidate correspondence", async () => {
+  const ai = await import("../src/ai");
+  const subdomains = await import("../src/subdomains");
+  const { discover } = await import("../src/discovery");
+  const original = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "test";
+  const scan = spyOn(subdomains, "scanSubdomains").mockResolvedValue([]);
+  const fetch = spyOn(network, "fetchPublic").mockImplementation(async (url) => ({
+    url, status: 200, headers: { "content-type": "text/html" }, bytes: 100,
+    body: '<title>Acme</title><script src="/main.js"></script>',
+  }));
+  const request = spyOn(ai, "requestJson").mockResolvedValue({ data: { scores: [0.9] }, inputTokens: 10 });
+  try {
+    const review = await discover("Acme", "https://acme.com", { domainLimit: 1, candidateLimit: 1 });
+    expect(review.recommended).toEqual(["https://acme.com/"]);
+    for (const scores of [[1.1], [-0.1], [], [0.9, 0.8], ["0.9"]]) {
+      request.mockResolvedValue({ data: { scores }, inputTokens: 10 });
+      await expect(discover("Acme", "https://acme.com", { domainLimit: 1, candidateLimit: 1 }))
+        .rejects.toThrow("Invalid monitoring recommendations");
+    }
+  } finally {
+    scan.mockRestore(); fetch.mockRestore(); request.mockRestore();
+    if (original === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = original;
+  }
 });
