@@ -1,0 +1,20 @@
+deploy/backup.sh
+  s_430b911825d83f::t_bf488d2ee224cd 14
+  s_430b911825d83f::t_60d7b6c3235bcc 5-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "91ab8493e3ef6c77c7a4e02afb887fa7979131c7",
+  "prompts": {},
+  "sessions": {
+    "s_430b911825d83f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b3ef-377d-7431-8baa-62dc78564cc2",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "randomperson12344 <4dennisk@gmail.com>"
+    }
+  }
+}
