@@ -246,3 +246,25 @@ test("structurally identical anonymous candidates stay ambiguous rather than hid
   expect(result.unseenChanged).toBe(true);
   for (const name of ["alpha", "beta", "gamma", "delta"]) expect(result.patch).toContain(name);
 });
+
+test("a deterministic provider reply failure leaves a queued observation uncertain after one attempt", async () => {
+  const ai = await import("../src/ai");
+  const previous = evidence("const feature=false;");
+  const current = evidence("const feature=true;");
+  db.query("INSERT INTO companies(id,name,url,created_at) VALUES('reply-failure','Failure','https://analysis.example.com',0)").run();
+  db.query("INSERT INTO bundle_versions(fingerprint,evidence) VALUES('reply-before',?)").run(JSON.stringify(previous));
+  const inserted = db.query("INSERT INTO releases(company_id,detected_at,previous_at,confirmed_at,fingerprint,evidence,url) VALUES('reply-failure',-1000000000,-1000000001,-999999999,'content-v3:reply-after',?,'https://analysis.example.com')")
+    .run(JSON.stringify(current));
+  db.query("INSERT INTO change_analysis(release_id,before_fingerprint) VALUES(?,'reply-before')").run(inserted.lastInsertRowid);
+  const request = spyOn(ai, "requestJson").mockRejectedValue(new ai.AIReplyError("AI request did not complete"));
+  try {
+    await analyzeNext();
+    expect(db.query("SELECT classification,attempts FROM change_analysis WHERE release_id=?").get(inserted.lastInsertRowid))
+      .toEqual({ classification: "uncertain", attempts: 1 });
+    expect(request).toHaveBeenCalledTimes(1);
+  } finally {
+    request.mockRestore();
+    db.query("DELETE FROM releases WHERE company_id='reply-failure'").run();
+    db.query("DELETE FROM companies WHERE id='reply-failure'").run();
+  }
+});

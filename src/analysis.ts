@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { aiModel, requestJson } from "./ai";
+import { aiModel, AIReplyError, requestJson } from "./ai";
 import { normalizeBuildMetadata } from "./build-metadata";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { db, now } from "./db";
@@ -134,7 +134,7 @@ export async function classifyChange(input: ReturnType<typeof comparison> & { ap
   const parsed = result.data as Analysis;
   if (!parsed || !["application", "build-only", "uncertain"].includes(parsed.classification) ||
     typeof parsed.summary !== "string" || !parsed.summary.trim() || parsed.summary.length > 500)
-    throw new Error("Invalid model analysis");
+    throw new AIReplyError("Invalid model analysis");
   if (!changeKinds.includes(parsed.kind as (typeof changeKinds)[number])) parsed.kind = null;
   if (technicalSummary(parsed.summary)) {
     try {
@@ -192,7 +192,7 @@ export async function analyzeNext() {
       .run(analysis.classification, analysis.summary.trim(), analysis.kind ?? null, analysisModel, analysisVersion, now(), pending.release_id);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const unavailable = /not archived|Ambiguous|limits/.test(message) || pending.attempts >= 2;
+    const unavailable = error instanceof AIReplyError || /not archived|Ambiguous|limits/.test(message) || pending.attempts >= 2;
     db.query(`UPDATE change_analysis SET classification=?,summary=?,attempts=attempts+1,next_attempt=?,error=?,analysis_version=? WHERE release_id=?`)
       .run(unavailable ? "uncertain" : null, unavailable ? "Not enough captured evidence to describe this change." : null,
         now() + 300 * 2 ** pending.attempts, message.slice(0, 240), analysisVersion, pending.release_id);

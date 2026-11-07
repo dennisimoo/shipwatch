@@ -171,7 +171,7 @@
             <p>
               The first successful check establishes a baseline. A different
               content fingerprint must persist on a follow-up check before we record it.
-              Deployment IDs, known Sentry debug metadata, and hashed asset references do not count by themselves.
+              Deployment IDs, known Sentry debug metadata, injected PostHog IDs, and hashed asset references do not count by themselves.
               Multiple changes within the same five-minute interval count once per website.
               Previously seen fingerprints and rollbacks don't add to the count.
             </p>

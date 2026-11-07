@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { requestJson } from "./ai";
+import { AIReplyError, requestJson } from "./ai";
 import { load } from "cheerio";
 import pLimit from "p-limit";
 import { randomBytes } from "node:crypto";
@@ -178,7 +178,7 @@ export async function shortlist(hosts: string[], website: string, limit: number,
     }, required: ["hosts"] }, client);
   const selected = (response.data as { hosts?: unknown })?.hosts;
   if (!Array.isArray(selected) || selected.some((host) => typeof host !== "string" || !hosts.includes(host)) || selected.length > limit)
-    throw new Error("Invalid candidate shortlist");
+    throw new AIReplyError("Invalid candidate shortlist");
   return [...new Set(selected)] as string[];
 }
 
@@ -277,7 +277,7 @@ export async function discover(
   const scores = (result.data as { scores?: unknown })?.scores;
   if (!Array.isArray(scores) || scores.length !== usable.length ||
     scores.some((score) => typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1))
-    throw new Error("Invalid monitoring recommendations");
+    throw new AIReplyError("Invalid monitoring recommendations");
   for (let index = 0; index < usable.length; index++) usable[index].probability = scores[index];
   return {
     method: "passive-subdomains-v2",

@@ -12,6 +12,7 @@ import { hash } from "./detect";
 import { backendMap } from "./backend-map";
 import { RateLimiterMemory, RateLimiterRes } from "rate-limiter-flexible";
 import Anthropic from "@anthropic-ai/sdk";
+import { AIReplyError } from "./ai";
 import {
   applyTargets,
   discover,
@@ -461,10 +462,12 @@ const server = Bun.serve({
         },
       );
     } catch (error) {
-      if (error instanceof Anthropic.APIError)
+      if (error instanceof Anthropic.APIError || error instanceof AIReplyError)
         return json(
           {
-            error: `Website review failed (HTTP ${error.status || "unknown"}). Please try again later.`,
+            error: error instanceof Anthropic.APIError
+              ? `Website review failed (HTTP ${error.status || "unknown"}). Please try again later.`
+              : "Website review could not complete. Please try again later.",
           },
           502,
         );
@@ -504,3 +507,5 @@ if (process.env.POLL_ENABLED !== "0") {
   startPolling();
   startDiscovery();
 }
+
+export default server;
